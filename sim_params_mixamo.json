@@ -1,0 +1,98 @@
+{
+    "output_loc": "D:/outputs/sim_results",
+
+    "options" :
+    {
+        "saveData": 1,
+        "saveModel": 1,
+        "useGPU":1,
+        "useLidarToolbox":0,
+        "useBaryCenters":0,
+
+        "logging_frequency": 3
+    },
+
+    "freq":
+    {
+
+        "f1": 275e9,
+        "f2": 305e9,
+        "nf": 128
+    },
+
+    "object":
+    {
+        "scale_": [1.2],
+        "scale": [1],
+        "scale_note":"scale divides model xyz locations by scale amount"
+
+    },
+
+    "array":
+    {
+        "array_type_":"exact",
+        "array_type":"regular",
+        "scale_factor": 1,
+        "tx":
+        {	"notes":"x=width,y=height,z=depth,units=meters",
+         "x":[0.15],
+         "y":[0.0],
+         "z":[0.0],
+         "x_":[-1.0, 1.0, -1.0, 1.0, -0.25, 0.25, -0.25, 0.25],
+         "y_":[-1.0, 1.0, 1.0, -1.0, -0.25, 0.25,  0.25, -0.25],
+         "z_":[ 0.0, 0.0, 0.0,  0.0,   0.0,  0.0,   0.0,  0.0]
+        }
+    },
+
+    "forward_model":
+    {
+        "chunk_size": 1000,
+        "model_decimation": 100,
+        "scatterer_tol_m" : 2e-4,
+        "resample":{"doResample": 0,"resample_nr":1e6}
+    },
+
+    "recon":
+    {
+        "fixed_recon": {
+            "use_fixed": 1,
+            "x_min": -0.5,
+            "x_max":  0.5,
+            "y_min":  0.0,
+            "y_max":  0.7,
+            "z_min":  0.0,
+            "z_max":  2.0,
+            "voxel_size": 0.01
+        },
+
+
+        "recon_type_": "mf",
+        "recon_type" : "bp",
+        "mf_params":
+        {  "nz": 33,
+        "width_pad_m": 2.2,
+        "height_pad_m": 2.2,
+        "depth_pad_m": 0.1,
+        "freq_window": "hann",
+        "spatial_window": "tukeywin",
+        "img_nr_pixels_width": 501,
+        "img_nr_pixels_height": 501
+    },
+    "bp_params":
+    {
+        "npad": 4096,
+        "width_pad_m": 0.2,
+        "height_pad_m": 0.2,
+        "depth_pad_m": 0.1,
+        "freq_window": "hann",
+        "spatial_window_": "tukeywin",
+        "spatial_window_param": 0.985,
+        "spatial_window": "none",
+        "spacing": [0.01, 0.01, 0.01]
+
+    }
+
+
+}
+
+}

@@ -1,0 +1,58 @@
+{
+    "proc_list":
+    [
+        {
+            "filepath":"D:/model_exports/26JUN09",
+            "pose": 1,
+            "model": "upsampled_models_2.00mm"
+        },
+
+        {
+            "filepath":"D:/model_exports/26JUN09",
+            "pose": 2,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 3,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 4,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 5,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 6,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 7,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 8,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 9,
+            "model": "upsampled_models_2.00mm"
+        },
+         {
+            "filepath":"D:/model_exports/26JUN05",
+            "pose": 10,
+            "model": "upsampled_models_2.00mm"
+         }
+   
+    ]
+
+}

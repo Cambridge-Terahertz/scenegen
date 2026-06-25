@@ -1,0 +1,30 @@
+{
+	"file_info":
+		{
+			"version": "260502.0.1",
+			"notes": "none"
+		},
+	"SMPLX_LOC":"D:/models/smplx-models/models_smplx_v1_1/models/smplx",
+	"output_dir":"D:/git_sandbox/SMPLX/export_batch"	
+	"gender": "m",
+	"pose":
+	{
+		"type":["arms_down_relaxed"],
+		"var_fac":0.1
+	},
+	"model_nr":5,
+	"body_type":
+	{
+		"height_m": 1.8,
+		"bmi":20,
+		"var_fac":0.1
+	},
+	"assets": 
+		{
+			"type":["gun1","cellphone1","wallet1"],
+			"locs":["front_left_waist","left_side_shirt_pocket","right_side_pants_pocket"],
+			"var_fac":0.1
+		}
+	
+	
+}

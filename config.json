@@ -1,0 +1,24 @@
+{
+	"file_info":
+		{
+			"version": "260502.0.1",
+			"notes": "none"
+		},
+	"gender": ["m"],
+	"pose_type":["arms_down_relaxed"],
+	"model_nr":[5],
+	"body_type":
+	{
+		"height_m": [1.8],
+		"bmi":[20],
+		"var_fac":[0.1]
+	},
+	"assets": 
+		{
+			"type":[["gun1","cellphone1","wallet1"]],
+			"locs":[["front_left_waist","left_side_shirt_pocket","right_side_pants_pocket"]],
+			"var_fac":[0.1]
+		}
+	
+	
+}
