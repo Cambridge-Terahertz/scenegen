@@ -68,7 +68,7 @@ void bp_kernel(
         const float re = td_re[base + n] * (1.0f - frac) + td_re[base + nn] * frac;
         const float im = td_im[base + n] * (1.0f - frac) + td_im[base + nn] * frac;
 
-        // carrier: exp(+j 2π f1 T)  (conjugate of forward's exp(-j 2π f T))
+        // carrier: exp(+j 2*pi f1 T)  (conjugate of forward's exp(-j 2*pi f T))
         REAL_T ph = TWO_PI * f1 * T;
         ph = ph - TWO_PI * FLOOR_FN(ph / TWO_PI);
         float cs, sn;
