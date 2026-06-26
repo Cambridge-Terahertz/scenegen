@@ -1,0 +1,42 @@
+# ---- OS ----
+.DS_Store
+._*
+
+# ---- MATLAB ----
+*.asv
+*.mex*            # .mexw64, .mexa64, ...
+*.slxc
+
+# ---- Visual Studio / CUDA build output ----
+.vs/
+x64/
+[Bb]in/
+[Oo]bj/
+*.tlog/
+ipch/
+*.ipch
+*.pch
+*.pdb
+*.idb
+*.ilk
+*.exp
+*.lib
+*.obj
+*.suo
+*.user
+*.VC.db
+*.VC.opendb
+Browse.VC.*
+ForwardM.*/      # VS scratch project dirs
+
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.pytest_cache/
+*.egg-info/
+.ipynb_checkpoints/
+
+# ---- Conda / local envs on the server ----
+miniconda3/

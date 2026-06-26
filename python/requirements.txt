@@ -1,0 +1,8 @@
+# Install numpy + pytest always, and ONE cupy wheel matching the server's CUDA.
+# Check the server's CUDA version first:  nvidia-smi   (top-right "CUDA Version")
+numpy>=1.24
+pytest>=7
+
+# --- pick ONE of these (comment out the other) ---
+cupy-cuda12x   # for CUDA 12.x
+# cupy-cuda11x # for CUDA 11.x
