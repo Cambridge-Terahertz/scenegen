@@ -1,0 +1,85 @@
+"""Scatterer-cloud sources for the forward model.
+
+Two entry points, with very different status:
+
+* ``load_xyz``      -- REAL data path. Port of read_xyz_binary.m: loads an
+                       actual exported body/asset point cloud. Production.
+* ``synthetic_body`` -- TEST FIXTURE ONLY. A crude parametric body of ellipsoid
+                       primitives, used to exercise forward->recon->save at real
+                       array scale and to get timing. It is NOT the model
+                       generation pipeline -- the real pose/asset flow (Mixamo
+                       export -> place_assets -> HPR cull, simulator_mixamo_flow.m)
+                       is a separate subsystem that has not been ported. Do not
+                       treat synthetic_body output as physically realistic.
+
+Geometry convention matches the rest of the pipeline: x = width, y = depth
+(downrange; the array sits near y=0 and the body stands at y=standoff),
+z = height. Only front-facing surface points (facing the array, -y) are kept,
+loosely mimicking the HPR occlusion cull in the MATLAB flow.
+"""
+
+from __future__ import annotations
+
+import numpy as np
+
+__all__ = ["synthetic_body", "load_xyz"]
+
+
+def load_xyz(path) -> np.ndarray:
+    """Read a raw float32 XYZ point cloud (port of read_xyz_binary.m).
+
+    The file is interleaved float32 triplets; returns (N, 3)."""
+    data = np.fromfile(path, dtype=np.float32)
+    return data.reshape(-1, 3)
+
+
+def _ellipsoid_front(center, radii, n, rng, oversample=3.0):
+    """Sample ~n points on the front (-y facing) surface of an ellipsoid."""
+    m = int(n * oversample)
+    v = rng.normal(size=(m, 3))
+    v /= np.linalg.norm(v, axis=1, keepdims=True)      # unit sphere
+    p = np.asarray(center) + v * np.asarray(radii)     # ellipsoid surface
+    normal = v / np.asarray(radii)                     # outward normal direction
+    front = normal[:, 1] < 0                           # facing the array (-y)
+    p = p[front]
+    return p[:n] if len(p) >= n else p
+
+
+def synthetic_body(n_points: int = 200_000, *, standoff: float = 2.0,
+                   with_asset: bool = True, seed: int = 0):
+    """A body-shaped front-surface cloud + optional concealed asset.
+
+    Returns (q, s): positions (N,3) and per-point reflectivity (N,).
+    """
+    rng = np.random.default_rng(seed)
+    y = standoff
+    # (name, center, radii, fraction of points)
+    parts = [
+        ("torso", (0.00, y, 0.20), (0.18, 0.13, 0.34), 0.34),
+        ("head",  (0.00, y, 0.66), (0.10, 0.10, 0.12), 0.08),
+        ("arm_l", (-0.26, y, 0.08), (0.06, 0.06, 0.30), 0.12),
+        ("arm_r", (0.26, y, 0.08), (0.06, 0.06, 0.30), 0.12),
+        ("leg_l", (-0.10, y, -0.55), (0.09, 0.09, 0.42), 0.17),
+        ("leg_r", (0.10, y, -0.55), (0.09, 0.09, 0.42), 0.17),
+    ]
+    pts, refl = [], []
+    for _name, c, r, frac in parts:
+        p = _ellipsoid_front(c, r, max(int(n_points * frac), 1), rng)
+        pts.append(p)
+        refl.append(np.full(len(p), 0.7))              # body reflectivity
+
+    if with_asset:
+        # a small dense bright patch on the torso front (gun-like)
+        na = max(int(n_points * 0.02), 200)
+        cx, cz = 0.08, -0.05
+        ax = np.column_stack([
+            cx + rng.uniform(-0.06, 0.06, na),
+            (y - 0.13) + rng.uniform(-0.004, 0.004, na),   # just in front of torso
+            cz + rng.uniform(-0.09, 0.09, na),
+        ])
+        pts.append(ax)
+        refl.append(np.full(na, 1.0))                  # high reflectivity
+
+    q = np.vstack(pts)
+    s = np.concatenate(refl)
+    return q, s
