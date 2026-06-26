@@ -20,6 +20,7 @@ glance at from the Mac mount; ``contact_sheet`` tiles them into a campaign index
 from __future__ import annotations
 
 import json
+import os
 from pathlib import Path
 from typing import Optional
 
@@ -31,9 +32,25 @@ matplotlib.use("Agg")  # headless: no display needed on the server
 import matplotlib.pyplot as plt
 from PIL import Image, ImageDraw, ImageFont
 
-__all__ = ["save_run", "load_run", "contact_sheet"]
+__all__ = ["save_run", "load_run", "contact_sheet", "output_root", "run_dir"]
 
 _H5_OPTS = dict(chunks=True, compression="gzip", compression_opts=4)
+
+# Where runs are saved. Default = the NAS mount on the GPU server (bose).
+# Override per machine with the RA_OUTPUT_ROOT env var:
+#   bose:  export RA_OUTPUT_ROOT=/mnt/shared_drive/Jonah/synthetic_data   (the default)
+#   Mac:   export RA_OUTPUT_ROOT=/Volumes/Shared_Drive/Jonah/synthetic_data
+DEFAULT_OUTPUT_ROOT = "/mnt/shared_drive/Jonah/synthetic_data"
+
+
+def output_root() -> Path:
+    """Root directory for saved runs (RA_OUTPUT_ROOT env var overrides default)."""
+    return Path(os.environ.get("RA_OUTPUT_ROOT", DEFAULT_OUTPUT_ROOT))
+
+
+def run_dir(run_id: str) -> Path:
+    """Full path for one run: <output_root>/<run_id>."""
+    return output_root() / run_id
 
 
 # ---------------------------------------------------------------------------
