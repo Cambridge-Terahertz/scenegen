@@ -2,6 +2,9 @@
 # Check the server's CUDA version first:  nvidia-smi   (top-right "CUDA Version")
 numpy>=1.24
 pytest>=7
+h5py>=3.8          # chunked, partial-read result storage (.h5)
+matplotlib>=3.6    # preview figures (max projections)
+pillow>=9          # contact-sheet tiling
 
 # --- pick ONE of these (comment out the other) ---
 cupy-cuda12x   # for CUDA 12.x
