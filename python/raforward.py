@@ -51,15 +51,18 @@ __all__ = ["Scene", "forward", "C0"]
 # ---------------------------------------------------------------------------
 # CUDA kernel
 # ---------------------------------------------------------------------------
-_KERNEL_SRC = r"""
+# Templated on REAL_T: fp64 keeps full accuracy (~1e-6) but is slow on consumer
+# GPUs (1/32 fp64 rate); fp32 is ~10-30x faster but carries the ~1e-3 phase error
+# from multi-metre distances (see forward_model_ref.py). __sincosf is always fp32.
+_KERNEL_TEMPLATE = r"""
 extern "C" __global__
 void forward_fused(
-    const double* __restrict__ qx, const double* __restrict__ qy,
-    const double* __restrict__ qz, const float*  __restrict__ s,
-    const double* __restrict__ rxx, const double* __restrict__ rxy,
-    const double* __restrict__ rxz,
-    const double* __restrict__ r1all,   // [ntx * ntarg], tx-major: r1all[tx*ntarg + t]
-    const double* __restrict__ kf,      // [nf]
+    const REAL_T* __restrict__ qx, const REAL_T* __restrict__ qy,
+    const REAL_T* __restrict__ qz, const float*  __restrict__ s,
+    const REAL_T* __restrict__ rxx, const REAL_T* __restrict__ rxy,
+    const REAL_T* __restrict__ rxz,
+    const REAL_T* __restrict__ r1all,   // [ntx * ntarg], tx-major: r1all[tx*ntarg + t]
+    const REAL_T* __restrict__ kf,      // [nf]
     const int ntarg, const int ntx, const int nrx, const int nf,
     float* __restrict__ sig_re, float* __restrict__ sig_im)
 {
@@ -70,24 +73,24 @@ void forward_fused(
     const int f = (int)(idx / nrx);          // output is row-major (nf, nrx)
     const int i = (int)(idx - (long)f * nrx);
 
-    const double rx0 = rxx[i], rx1 = rxy[i], rx2 = rxz[i];
-    const double k = kf[f];
-    const double TWO_PI = 6.283185307179586;
+    const REAL_T rx0 = rxx[i], rx1 = rxy[i], rx2 = rxz[i];
+    const REAL_T k = kf[f];
+    const REAL_T TWO_PI = 6.283185307179586;
 
     float acc_re = 0.0f, acc_im = 0.0f;      // float32 accumulation
     for (int tx = 0; tx < ntx; ++tx) {
-        const double* r1p = r1all + (long)tx * ntarg;
+        const REAL_T* r1p = r1all + (long)tx * ntarg;
         for (int t = 0; t < ntarg; ++t) {
-            const double dx = rx0 - qx[t];
-            const double dy = rx1 - qy[t];
-            const double dz = rx2 - qz[t];
-            const double r2 = sqrt(dx * dx + dy * dy + dz * dz);  // fp64 distance
-            const double r1 = r1p[t];
-            const double amp = (double)s[t] / (r1 * r2);
+            const REAL_T dx = rx0 - qx[t];
+            const REAL_T dy = rx1 - qy[t];
+            const REAL_T dz = rx2 - qz[t];
+            const REAL_T r2 = SQRT_FN(dx * dx + dy * dy + dz * dz);
+            const REAL_T r1 = r1p[t];
+            const REAL_T amp = (REAL_T)s[t] / (r1 * r2);
 
-            // phase in fp64, range-reduce in fp64, sincos in fp32
-            double ph = -k * (r1 + r2);
-            ph = ph - TWO_PI * floor(ph / TWO_PI);
+            // phase + range reduction in REAL_T, sincos in fp32
+            REAL_T ph = -k * (r1 + r2);
+            ph = ph - TWO_PI * FLOOR_FN(ph / TWO_PI);
             float cs, sn;
             __sincosf((float)ph, &sn, &cs);                      // exp(j ph) = cs + j sn
 
@@ -100,16 +103,25 @@ void forward_fused(
 }
 """
 
-_raw_kernel = None
+# precision -> (cuda real type, sqrt fn, floor fn, numpy dtype)
+_PRECISION = {
+    "fp64": ("double", "sqrt", "floor", np.float64),
+    "fp32": ("float", "sqrtf", "floorf", np.float32),
+}
+_kernels: dict = {}
 
 
-def _get_kernel():
-    global _raw_kernel
-    if _raw_kernel is None:
-        if not _HAS_CUPY:
-            raise RuntimeError("CuPy is not available; GPU path cannot run.")
-        _raw_kernel = cp.RawKernel(_KERNEL_SRC, "forward_fused")
-    return _raw_kernel
+def _get_kernel(precision: str):
+    if not _HAS_CUPY:
+        raise RuntimeError("CuPy is not available; GPU path cannot run.")
+    if precision not in _PRECISION:
+        raise ValueError(f"precision must be one of {list(_PRECISION)}")
+    if precision not in _kernels:
+        real, sqrt_fn, floor_fn, _ = _PRECISION[precision]
+        src = (_KERNEL_TEMPLATE.replace("REAL_T", real)
+               .replace("SQRT_FN", sqrt_fn).replace("FLOOR_FN", floor_fn))
+        _kernels[precision] = cp.RawKernel(src, "forward_fused")
+    return _kernels[precision]
 
 
 # ---------------------------------------------------------------------------
@@ -184,7 +196,8 @@ class Scene:
 # ---------------------------------------------------------------------------
 # Public API
 # ---------------------------------------------------------------------------
-def forward(scene: Scene, backend: Backend = "auto") -> np.ndarray:
+def forward(scene: Scene, backend: Backend = "auto",
+            precision: str = "fp64") -> np.ndarray:
     """Compute the forward-model signal ``sig`` of shape ``(nf, nrx)`` complex64.
 
     Parameters
@@ -192,26 +205,30 @@ def forward(scene: Scene, backend: Backend = "auto") -> np.ndarray:
     scene : Scene
     backend : {"auto", "gpu", "cpu"}
         "auto" uses the GPU when CuPy is importable, else the NumPy mirror.
+    precision : {"fp64", "fp32"}
+        GPU only. fp64 is accurate (~1e-6) but slow on consumer GPUs; fp32 is
+        much faster but ~1e-3 (the current-mex accuracy). CPU is always fp64-ish.
     """
     if backend == "gpu" or (backend == "auto" and _HAS_CUPY):
-        return _forward_gpu(scene)
+        return _forward_gpu(scene, precision)
     return _forward_numpy(scene)
 
 
-def _forward_gpu(scene: Scene) -> np.ndarray:
+def _forward_gpu(scene: Scene, precision: str = "fp64") -> np.ndarray:
     """GPU path: single fused RawKernel launch. Requires CuPy + a CUDA GPU."""
     if not _HAS_CUPY:
         raise RuntimeError("CuPy is not available; use backend='cpu'.")
-    q = cp.asarray(scene.q, cp.float64)
-    tx = cp.asarray(scene.tx, cp.float64)
-    rx = cp.asarray(scene.rx, cp.float64)
+    rdt = _PRECISION[precision][3]
+    q = cp.asarray(scene.q, rdt)
+    tx = cp.asarray(scene.tx, rdt)
+    rx = cp.asarray(scene.rx, rdt)
     s = cp.asarray(scene.s, cp.float32)
-    k = cp.asarray(scene.k, cp.float64)
+    k = cp.asarray(scene.k, rdt)
     ntarg, ntx, nrx, nf = scene.ntarg, scene.ntx, scene.nrx, scene.nf
 
     # Step 2: precompute r1 = |TX - q| once, tx-major (ntx, ntarg) -> flat
     r1 = cp.linalg.norm(q[None, :, :] - tx[:, None, :], axis=2)   # (ntx, ntarg)
-    r1all = cp.ascontiguousarray(r1).ravel()
+    r1all = cp.ascontiguousarray(r1).ravel().astype(rdt)
 
     qx = cp.ascontiguousarray(q[:, 0])
     qy = cp.ascontiguousarray(q[:, 1])
@@ -225,7 +242,7 @@ def _forward_gpu(scene: Scene) -> np.ndarray:
 
     threads = 256
     blocks = (nf * nrx + threads - 1) // threads
-    _get_kernel()(
+    _get_kernel(precision)(
         (blocks,), (threads,),
         (qx, qy, qz, s, rxx, rxy, rxz, r1all, k,
          np.int32(ntarg), np.int32(ntx), np.int32(nrx), np.int32(nf),

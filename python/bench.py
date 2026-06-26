@@ -49,23 +49,28 @@ def benchmark(ntarg: int, nrx: int, nf: int, reps: int) -> None:
         print("CuPy unavailable — cannot time the GPU kernel on this host.")
         return
 
-    # warm-up (first launch compiles the RawKernel)
-    _ = rf.forward(scene, backend="gpu")
-    _sync()
-
-    times = []
-    for _ in range(reps):
-        t0 = time.perf_counter()
-        _ = rf.forward(scene, backend="gpu")
+    ref64 = None
+    best = {}
+    for prec in ("fp64", "fp32"):
+        out = rf.forward(scene, backend="gpu", precision=prec)   # warm-up + compile
         _sync()
-        times.append(time.perf_counter() - t0)
+        if prec == "fp64":
+            ref64 = out
+        acc = float(np.max(np.abs(out - ref64)) / np.max(np.abs(ref64)))
 
-    best = min(times)
-    print(f"GPU forward: best {best * 1e3:8.1f} ms  "
-          f"(median {np.median(times) * 1e3:.1f} ms over {reps} reps)")
-    print(f"throughput : {n_eval / best / 1e9:.1f} G-eval/s")
-    print(f"vs ~50 min current mex: ~{50 * 60 / best:.0f}x faster "
-          f"(same ntarg/nrx/nf assumed)")
+        times = []
+        for _ in range(reps):
+            t0 = time.perf_counter()
+            _ = rf.forward(scene, backend="gpu", precision=prec)
+            _sync()
+            times.append(time.perf_counter() - t0)
+        best[prec] = min(times)
+        print(f"  {prec}: best {best[prec] * 1e3:8.1f} ms   "
+              f"{n_eval / best[prec] / 1e9:6.1f} G-eval/s   "
+              f"relerr-vs-fp64 {acc:.1e}   ~{50 * 60 / best[prec]:.0f}x vs 50min")
+
+    print(f"\n  -> fp32 is {best['fp64'] / best['fp32']:.1f}x faster than fp64 "
+          f"(the cost of dropping fp64 distances on this GPU)")
 
 
 def main() -> None:
