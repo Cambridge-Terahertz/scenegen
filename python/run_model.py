@@ -30,6 +30,46 @@ def build_grid(q, *, pad_xy=0.1, pad_depth=0.1, voxel=0.01):
     return ReconGrid(xs=xs, ys=ys, zs=zs)
 
 
+def process_and_save(q, s, *, run_id, source="", nrx=16_900, nf=128,
+                     precision="fp32", voxel=0.01, npad=4096, extra_meta=None):
+    """Geometry -> forward -> recon -> save_run for one cloud. Returns run dir."""
+    geom = rf.Scene.demo(ntarg=1, nrx=nrx, nf=nf)
+    scene = rf.Scene(q=q, s=s, tx=geom.tx, rx=geom.rx, k=geom.k)
+    f = scene.k * C0 / (2 * np.pi)
+    grid = build_grid(q, voxel=voxel)
+    nvox = int(np.prod(grid.shape))
+    print(f"array: nrx={scene.nrx:,}  nf={scene.nf}  |  recon grid {grid.shape} = {nvox:,} voxels")
+    print(f"precision: {precision}  backend: {'gpu' if rf._HAS_CUPY else 'cpu'}")
+
+    t0 = time.perf_counter()
+    sig = rf.forward(scene, precision=precision)
+    if rf._HAS_CUPY:
+        rf.cp.cuda.Stream.null.synchronize()
+    t_fwd = time.perf_counter() - t0
+    print(f"forward : {t_fwd:7.2f} s  ({scene.ntarg*scene.nrx*scene.nf/t_fwd/1e9:.1f} G-eval/s)")
+
+    t0 = time.perf_counter()
+    img = backproject(sig, tx=scene.tx, rx=scene.rx, f=f, grid=grid,
+                      npad=npad, precision=precision)
+    if rf._HAS_CUPY:
+        rf.cp.cuda.Stream.null.synchronize()
+    t_rec = time.perf_counter() - t0
+    print(f"recon   : {t_rec:7.2f} s")
+
+    meta = {
+        "run_id": run_id, "source": source,
+        "ntarg": int(scene.ntarg), "nrx": int(scene.nrx), "nf": int(scene.nf),
+        "precision": precision, "voxel_m": voxel, "grid_shape": list(grid.shape),
+        "timing_s": {"forward": round(t_fwd, 3), "recon": round(t_rec, 3)},
+    }
+    if extra_meta:
+        meta.update(extra_meta)
+    d = save_run(run_dir(run_id), img=img, grid=grid, meta=meta,
+                 sig=sig, f=f, tx=scene.tx, rx=scene.rx, targ=scene.q)
+    print(f"saved -> {d}")
+    return d
+
+
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--scene", help="folder with body/ + assets/ (real data)")
@@ -58,54 +98,21 @@ def main() -> None:
         q, s = load_real_scene(args.scene, decimate=args.decimate, assets=args.assets,
                                zbuffer=not args.no_zbuffer, zbuffer_pixel=args.zbuffer_pixel,
                                density_weight=not args.no_density_weight)
+        source = args.scene
         print(f"  total {len(q):,} scatterers")
     elif args.xyz:
         q = load_xyz(args.xyz).astype(np.float64)
         s = np.full(len(q), 0.7)
+        source = args.xyz
         print(f"loaded {len(q):,} points from {args.xyz}")
     else:
         q, s = synthetic_body(args.n_points, with_asset=not args.no_asset)
+        source = "synthetic_body"
         print(f"synthetic body: {len(q):,} scatterers"
               f"{' + asset' if not args.no_asset else ''}")
 
-    # --- system geometry (real array + chirp) ---
-    geom = rf.Scene.demo(ntarg=1, nrx=args.nrx, nf=args.nf)
-    scene = rf.Scene(q=q, s=s, tx=geom.tx, rx=geom.rx, k=geom.k)
-    f = scene.k * C0 / (2 * np.pi)
-    grid = build_grid(q, voxel=args.voxel)
-    nvox = int(np.prod(grid.shape))
-    print(f"array: nrx={scene.nrx:,}  nf={scene.nf}  |  recon grid {grid.shape} = {nvox:,} voxels")
-    print(f"precision: {args.precision}  backend: {'gpu' if rf._HAS_CUPY else 'cpu'}")
-
-    # --- forward ---
-    t0 = time.perf_counter()
-    sig = rf.forward(scene, precision=args.precision)
-    if rf._HAS_CUPY:
-        rf.cp.cuda.Stream.null.synchronize()
-    t_fwd = time.perf_counter() - t0
-    print(f"forward : {t_fwd:7.2f} s  ({scene.ntarg*scene.nrx*scene.nf/t_fwd/1e9:.1f} G-eval/s)")
-
-    # --- recon ---
-    t0 = time.perf_counter()
-    img = backproject(sig, tx=scene.tx, rx=scene.rx, f=f, grid=grid,
-                      npad=4096, precision=args.precision)
-    if rf._HAS_CUPY:
-        rf.cp.cuda.Stream.null.synchronize()
-    t_rec = time.perf_counter() - t0
-    print(f"recon   : {t_rec:7.2f} s  ({nvox*scene.nrx/t_rec/1e9:.1f} G-(vox*rx)/s)")
-
-    # --- save ---
-    meta = {
-        "run_id": args.run_id, "source": args.xyz or "synthetic_body",
-        "ntarg": int(scene.ntarg), "nrx": int(scene.nrx), "nf": int(scene.nf),
-        "precision": args.precision, "voxel_m": args.voxel,
-        "grid_shape": list(grid.shape),
-        "timing_s": {"forward": round(t_fwd, 3), "recon": round(t_rec, 3)},
-    }
-    d = save_run(run_dir(args.run_id), img=img, grid=grid, meta=meta,
-                 sig=sig, f=f, tx=scene.tx, rx=scene.rx, targ=scene.q)
-    print(f"\nsaved -> {d}")
-    print(f"preview: {d}/preview/max_projections.png")
+    process_and_save(q, s, run_id=args.run_id, source=source, nrx=args.nrx, nf=args.nf,
+                     precision=args.precision, voxel=args.voxel)
 
 
 if __name__ == "__main__":

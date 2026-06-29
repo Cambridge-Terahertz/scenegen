@@ -109,11 +109,12 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
     q_list, s_list = [qb], [np.full(len(qb), body_s, np.float64)]
 
     if assets:
-        asset_s = json.loads((folder / "assets" / "assets.json").read_text())
+        ajson = folder / "assets" / "assets.json"
+        asset_s = json.loads(ajson.read_text()) if ajson.exists() else {}
         for name in assets:
             f = folder / "assets" / f"{name}.xyz"
-            if not f.exists():
-                print(f"  (asset '{name}' not found, skipping)")
+            if not f.exists() or name not in asset_s:
+                print(f"  (asset '{name}' not available, skipping)")
                 continue
             pa = reorient(load_xyz(f))
             q_list.append(pa)
