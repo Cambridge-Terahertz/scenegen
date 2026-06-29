@@ -25,7 +25,27 @@ from pathlib import Path
 
 import numpy as np
 
-__all__ = ["synthetic_body", "load_xyz", "load_real_scene", "density_weights"]
+__all__ = ["synthetic_body", "load_xyz", "load_real_scene",
+           "density_weights", "zbuffer_cull"]
+
+
+def zbuffer_cull(q, pixel: float = 0.001, depth_axis: int = 1) -> np.ndarray:
+    """Keep only the nearest point per cross-range pixel along `depth_axis`,
+    i.e. the front surface facing the array.
+
+    The array sits at the near side and cannot see through the body, so the
+    occluded back surface (~half the points) must not contribute. This is a
+    simple z-buffer (port of the role of ZBuffer2.m): bin in the two cross-range
+    axes, keep the smallest-depth point per bin. Returns kept indices.
+    """
+    q = np.asarray(q)
+    other = [a for a in range(3) if a != depth_axis]
+    cell = np.floor(q[:, other] / pixel).astype(np.int64)
+    cell -= cell.min(0)
+    key = cell[:, 0] * (cell[:, 1].max() + 1) + cell[:, 1]
+    order = np.argsort(q[:, depth_axis], kind="stable")   # nearest (small depth) first
+    first = np.unique(key[order], return_index=True)[1]
+    return order[first]
 
 
 def density_weights(q, voxel: float = 0.005) -> np.ndarray:
@@ -54,7 +74,8 @@ def load_xyz(path) -> np.ndarray:
 
 
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
-                    standoff: float = 2.0, density_weight: bool = True,
+                    standoff: float = 2.0, zbuffer: bool = True,
+                    zbuffer_pixel: float = 0.001, density_weight: bool = True,
                     density_voxel: float = 0.005):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
@@ -101,6 +122,11 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
 
     q = np.vstack(q_list)
     s = np.concatenate(s_list)          # material reflectivity per point
+    if zbuffer:
+        keep = zbuffer_cull(q, zbuffer_pixel)
+        q, s = q[keep], s[keep]          # front surface only (occlusion)
+        print(f"  z-buffer cull (pixel {zbuffer_pixel*1e3:.1f} mm): "
+              f"{len(keep):,} front-surface pts")
     if density_weight:
         w = density_weights(q, density_voxel)
         s = s * w                        # area-normalise non-uniform meshing

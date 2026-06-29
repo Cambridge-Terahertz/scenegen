@@ -36,6 +36,11 @@ def main() -> None:
     p.add_argument("--decimate", type=int, default=1, help="body stride (e.g. 3)")
     p.add_argument("--assets", nargs="*", default=["phone"],
                    help="placed assets to include (default: phone)")
+    p.add_argument("--no-zbuffer", action="store_true",
+                   help="keep occluded (back) surface points")
+    p.add_argument("--zbuffer-pixel", type=float, default=0.001)
+    p.add_argument("--no-density-weight", action="store_true",
+                   help="don't area-normalise non-uniform meshing")
     p.add_argument("--xyz", help="single real .xyz cloud")
     p.add_argument("--n-points", type=int, default=200_000)
     p.add_argument("--no-asset", action="store_true")
@@ -49,7 +54,9 @@ def main() -> None:
     # --- cloud ---
     if args.scene:
         print(f"real scene: {args.scene}  (body 1:{args.decimate}, assets={args.assets})")
-        q, s = load_real_scene(args.scene, decimate=args.decimate, assets=args.assets)
+        q, s = load_real_scene(args.scene, decimate=args.decimate, assets=args.assets,
+                               zbuffer=not args.no_zbuffer, zbuffer_pixel=args.zbuffer_pixel,
+                               density_weight=not args.no_density_weight)
         print(f"  total {len(q):,} scatterers")
     elif args.xyz:
         q = load_xyz(args.xyz).astype(np.float64)
