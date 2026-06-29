@@ -26,7 +26,51 @@ from pathlib import Path
 import numpy as np
 
 __all__ = ["synthetic_body", "load_xyz", "load_real_scene",
-           "density_weights", "zbuffer_cull"]
+           "density_weights", "zbuffer_cull", "place_asset"]
+
+
+def _axis_rotmat(axis, angle):
+    """Rotation matrix for `angle` about `axis` (Rodrigues, pure numpy)."""
+    a = np.asarray(axis, float)
+    a = a / (np.linalg.norm(a) + 1e-30)
+    K = np.array([[0, -a[2], a[1]], [a[2], 0, -a[0]], [-a[1], a[0], 0]])
+    return np.eye(3) + np.sin(angle) * K + (1 - np.cos(angle)) * (K @ K)
+
+
+def place_asset(body, asset, target, *, tilt_deg: float = 0.0, seed: int = 0):
+    """Snap an unplaced asset onto the body surface near `target` (port of the
+    core of place_assets.m). All inputs in one coordinate frame.
+
+    Steps: centre the asset and move it to `target`; find the nearest body point;
+    estimate the local surface normal (smallest PCA axis of body points within
+    6 cm); seat the asset against the surface (offset 0.25*thickness + 3 mm along
+    the normal); apply a small final tilt about the asset's principal axis.
+    """
+    rng = np.random.default_rng(seed)
+    body = np.asarray(body, float)
+    asset = np.asarray(asset, float)
+    asset = asset - asset.mean(0) + np.asarray(target, float)   # centre + preplace
+    attach = asset.mean(0)
+
+    body_hit = body[np.argmin(((body - attach) ** 2).sum(1))]   # nearest body point
+    local = body[np.linalg.norm(body - body_hit, axis=1) < 0.06]
+    if len(local) < 3:
+        local = body
+    _, _, Vt = np.linalg.svd(local - local.mean(0), full_matrices=False)
+    normal = Vt[2]                                               # surface normal
+    if np.dot(attach - body_hit, normal) < 0:
+        normal = -normal
+    normal /= np.linalg.norm(normal)
+
+    proj = asset @ normal                                       # seat on surface
+    offset = 0.25 * (proj.max() - proj.min()) + 0.003
+    asset = asset + (body_hit + offset * normal - attach)
+
+    ctr = asset.mean(0)                                         # final tilt
+    _, _, Va = np.linalg.svd(asset - ctr, full_matrices=False)
+    ang = np.deg2rad(tilt_deg + 0.3 * rng.standard_normal())
+    asset = (asset - ctr) @ _axis_rotmat(Va[0], ang).T + ctr
+    return asset
 
 
 def zbuffer_cull(q, pixel: float = 0.001, depth_axis: int = 1) -> np.ndarray:
@@ -76,7 +120,7 @@ def load_xyz(path) -> np.ndarray:
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
                     standoff: float = 2.0, zbuffer: bool = True,
                     zbuffer_pixel: float = 0.0002, density_weight: bool = True,
-                    density_voxel: float = 0.005):
+                    density_voxel: float = 0.005, placements=None):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
 
@@ -85,9 +129,10 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
     with the front facing the array, z=height centred), decimates the body by
     `decimate`, and tags reflectivity from the body/asset JSONs.
 
-    Only assets already placed in the body frame should be passed (e.g. `phone`);
-    unplaced assets (e.g. `gun`, exported at the origin) need the place_assets
-    positioning, which is not ported. Returns (q, s).
+    Assets already placed in the body frame (e.g. `phone`) are used as-is; assets
+    exported at the origin (e.g. `gun`) are snapped to the body surface via
+    place_asset at a target location (override per asset with `placements`, a
+    dict name -> (fx, fy, fz) bbox fractions in the export frame). Returns (q, s).
     """
     folder = Path(folder)
     body = load_xyz(folder / "body" / "body.xyz")
@@ -105,6 +150,12 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
             p[:, 1] - y_mean,                 # height (z), centred
         ])
 
+    # for snapping unplaced assets: decimated body (fast queries) + bbox
+    body_place = body[:: max(len(body) // 400_000, 1)]
+    blo, bhi = body.min(0), body.max(0)
+    place_frac = {"gun": (0.40, 0.52, 1.0)}     # front-waist (export-frame bbox fractions)
+    placements = placements or {}
+
     qb = reorient(body)[::decimate]
     q_list, s_list = [qb], [np.full(len(qb), body_s, np.float64)]
 
@@ -116,7 +167,15 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
             if not f.exists() or name not in asset_s:
                 print(f"  (asset '{name}' not available, skipping)")
                 continue
-            pa = reorient(load_xyz(f))
+            a = load_xyz(f).astype(np.float64)
+            if np.abs(a.mean(0)).max() < 0.05:          # at origin -> snap to body surface
+                frac = placements.get(name) or place_frac.get(name)
+                if frac is None:
+                    print(f"  (asset '{name}' at origin, no placement target -> skipping)")
+                    continue
+                a = place_asset(body_place, a, blo + np.asarray(frac) * (bhi - blo))
+                print(f"  placed '{name}' on body surface")
+            pa = reorient(a)
             q_list.append(pa)
             s_list.append(np.full(len(pa), asset_s[name]["s"], np.float64))
             print(f"  + asset '{name}': {len(pa):,} pts, s={asset_s[name]['s']}")
