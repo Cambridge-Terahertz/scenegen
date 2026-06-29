@@ -61,9 +61,12 @@ void bp_kernel(
         // range profile is periodic with period P: sample at delay mod P
         const REAL_T tau = T - P * FLOOR_FN(T / P);
         const REAL_T xs = tau / dt;
-        const int n = (int)floor(xs);
-        const int nn = (n + 1 == npad) ? 0 : (n + 1);   // periodic neighbour
+        int n = (int)FLOOR_FN(xs);
         const float frac = (float)(xs - (REAL_T)n);
+        // guard the fp boundary: tau can round up to P, giving n == npad (OOB)
+        if (n >= npad) n -= npad;
+        if (n < 0)     n += npad;
+        const int nn = (n + 1 == npad) ? 0 : (n + 1);   // periodic neighbour
         const long base = (long)i * npad;
         const float re = td_re[base + n] * (1.0f - frac) + td_re[base + nn] * frac;
         const float im = td_im[base + n] * (1.0f - frac) + td_im[base + nn] * frac;
