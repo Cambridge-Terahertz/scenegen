@@ -38,7 +38,8 @@ def main() -> None:
                    help="placed assets to include (default: phone)")
     p.add_argument("--no-zbuffer", action="store_true",
                    help="keep occluded (back) surface points")
-    p.add_argument("--zbuffer-pixel", type=float, default=0.001)
+    p.add_argument("--zbuffer-pixel", type=float, default=0.0002,
+                   help="front-surface pixel [m]; <= lambda/5 to preserve sampling")
     p.add_argument("--no-density-weight", action="store_true",
                    help="don't area-normalise non-uniform meshing")
     p.add_argument("--xyz", help="single real .xyz cloud")

@@ -75,7 +75,7 @@ def load_xyz(path) -> np.ndarray:
 
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
                     standoff: float = 2.0, zbuffer: bool = True,
-                    zbuffer_pixel: float = 0.001, density_weight: bool = True,
+                    zbuffer_pixel: float = 0.0002, density_weight: bool = True,
                     density_voxel: float = 0.005):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
