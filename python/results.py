@@ -85,9 +85,56 @@ def save_run(run_dir, *, img: np.ndarray, grid, meta: dict,
             h.create_dataset("model/targ", data=np.asarray(targ, np.float32), **_H5_OPTS)
 
     (run_dir / "meta.json").write_text(json.dumps(meta, indent=2, default=str))
+    title = str(meta.get("run_id", run_dir.name))
     _save_max_projections(run_dir / "preview" / "max_projections.png",
-                          img, grid, db_floor, title=str(meta.get("run_id", run_dir.name)))
+                          img, grid, db_floor, title=title)
+    if targ is not None:
+        _save_model_vs_recon(run_dir / "preview" / "model_vs_recon.png",
+                             img, targ, grid, db_floor, title=title)
     return run_dir
+
+
+# axis index to collapse, plus axis labels, for each max-projection
+_PROJ = [
+    ("XY (width-depth)", 2, "xs", "ys", "x [m]", "depth y [m]"),
+    ("XZ (width-height)", 1, "xs", "zs", "x [m]", "height z [m]"),
+    ("YZ (depth-height)", 0, "ys", "zs", "depth y [m]", "height z [m]"),
+]
+
+
+def _model_hist(targ, grid):
+    """3D point-count histogram of the scatterer cloud on the recon grid."""
+    def edges(g):
+        d = g[1] - g[0]
+        return np.r_[g - d / 2, g[-1] + d / 2]
+    H, _ = np.histogramdd(np.asarray(targ),
+                          bins=[edges(grid.xs), edges(grid.ys), edges(grid.zs)])
+    return H
+
+
+def _save_model_vs_recon(path, img, targ, grid, db_floor, title=""):
+    """Top row: input model (scatterer density). Bottom row: recon (dB). Same axes."""
+    mag = np.abs(np.asarray(img))
+    peak = mag.max() if mag.size else 1.0
+    db = 20.0 * np.log10(np.maximum(mag, peak * 1e-9) / max(peak, 1e-30))
+    mdl = np.sqrt(_model_hist(targ, grid))     # sqrt compresses density dynamic range
+
+    fig, axes = plt.subplots(2, 3, figsize=(15, 9))
+    for col, (name, ax, ha, va, xl, yl) in enumerate(_PROJ):
+        h, v = getattr(grid, ha), getattr(grid, va)
+        ext = [h[0], h[-1], v[0], v[-1]]
+        im0 = axes[0, col].imshow(mdl.max(axis=ax).T, origin="lower", aspect="auto",
+                                  cmap="viridis", extent=ext)
+        axes[0, col].set_title(f"model  {name}"); axes[0, col].set_xlabel(xl); axes[0, col].set_ylabel(yl)
+        fig.colorbar(im0, ax=axes[0, col], label="pts")
+        im1 = axes[1, col].imshow(db.max(axis=ax).T, origin="lower", aspect="auto",
+                                  cmap="jet", vmin=db_floor, vmax=0, extent=ext)
+        axes[1, col].set_title(f"recon  {name}"); axes[1, col].set_xlabel(xl); axes[1, col].set_ylabel(yl)
+        fig.colorbar(im1, ax=axes[1, col], label="dB")
+    fig.suptitle(title, fontsize=14)
+    fig.tight_layout()
+    fig.savefig(path, dpi=110)
+    plt.close(fig)
 
 
 def _save_max_projections(path, img, grid, db_floor, title=""):
