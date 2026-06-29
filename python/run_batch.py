@@ -38,7 +38,7 @@ def main() -> None:
     p.add_argument("--assets", nargs="*", default=["phone"])
     p.add_argument("--decimate", type=int, default=1)
     p.add_argument("--no-zbuffer", action="store_true")
-    p.add_argument("--zbuffer-pixel", type=float, default=0.0002)
+    p.add_argument("--zbuffer-pixel", type=float, default=0.003)
     p.add_argument("--no-density-weight", action="store_true")
     p.add_argument("--precision", choices=["fp32", "fp64"], default="fp32")
     p.add_argument("--voxel", type=float, default=0.01)

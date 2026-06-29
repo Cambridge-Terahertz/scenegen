@@ -73,23 +73,27 @@ def place_asset(body, asset, target, *, tilt_deg: float = 0.0, seed: int = 0):
     return asset
 
 
-def zbuffer_cull(q, pixel: float = 0.001, depth_axis: int = 1) -> np.ndarray:
-    """Keep only the nearest point per cross-range pixel along `depth_axis`,
-    i.e. the front surface facing the array.
+def zbuffer_cull(q, pixel: float = 0.003, depth_axis: int = 1,
+                 keep_depth: float = 0.02) -> np.ndarray:
+    """Occlusion cull: keep the front-facing surface, drop the occluded back.
 
-    The array sits at the near side and cannot see through the body, so the
-    occluded back surface (~half the points) must not contribute. This is a
-    simple z-buffer (port of the role of ZBuffer2.m): bin in the two cross-range
-    axes, keep the smallest-depth point per bin. Returns kept indices.
+    The array sits at the near side and can't see through the body, so the back
+    surface (~half the points) must not contribute. Bin the two cross-range axes
+    into `pixel`-sized cells, find the nearest (min-depth) point per cell, and
+    keep every point within `keep_depth` of that front. This removes the back
+    while preserving the *full-resolution* front surface (no resampling) -- a
+    coarse `pixel` makes front/back reliably share a cell, `keep_depth` is the
+    front-slab thickness. Returns kept indices.
     """
     q = np.asarray(q)
     other = [a for a in range(3) if a != depth_axis]
     cell = np.floor(q[:, other] / pixel).astype(np.int64)
     cell -= cell.min(0)
     key = cell[:, 0] * (cell[:, 1].max() + 1) + cell[:, 1]
-    order = np.argsort(q[:, depth_axis], kind="stable")   # nearest (small depth) first
-    first = np.unique(key[order], return_index=True)[1]
-    return order[first]
+    uniq, inv = np.unique(key, return_inverse=True)
+    cmin = np.full(len(uniq), np.inf)
+    np.minimum.at(cmin, inv, q[:, depth_axis])            # nearest depth per cell
+    return np.where(q[:, depth_axis] <= cmin[inv] + keep_depth)[0]
 
 
 def density_weights(q, voxel: float = 0.005) -> np.ndarray:
@@ -119,7 +123,7 @@ def load_xyz(path) -> np.ndarray:
 
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
                     standoff: float = 2.0, zbuffer: bool = True,
-                    zbuffer_pixel: float = 0.0002, density_weight: bool = True,
+                    zbuffer_pixel: float = 0.003, density_weight: bool = True,
                     density_voxel: float = 0.005, placements=None):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
