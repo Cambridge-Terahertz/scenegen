@@ -19,7 +19,7 @@ import numpy as np
 import raforward as rf
 from recon import ReconGrid, backproject, C0
 from results import save_run, run_dir
-from bodies import synthetic_body, load_xyz
+from bodies import synthetic_body, load_xyz, load_real_scene
 
 
 def build_grid(q, *, pad_xy=0.1, pad_depth=0.1, voxel=0.01):
@@ -32,7 +32,11 @@ def build_grid(q, *, pad_xy=0.1, pad_depth=0.1, voxel=0.01):
 
 def main() -> None:
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument("--xyz", help="real .xyz cloud (else synthetic body)")
+    p.add_argument("--scene", help="folder with body/ + assets/ (real data)")
+    p.add_argument("--decimate", type=int, default=1, help="body stride (e.g. 3)")
+    p.add_argument("--assets", nargs="*", default=["phone"],
+                   help="placed assets to include (default: phone)")
+    p.add_argument("--xyz", help="single real .xyz cloud")
     p.add_argument("--n-points", type=int, default=200_000)
     p.add_argument("--no-asset", action="store_true")
     p.add_argument("--nrx", type=int, default=16_900, help="130x130 array")
@@ -43,7 +47,11 @@ def main() -> None:
     args = p.parse_args()
 
     # --- cloud ---
-    if args.xyz:
+    if args.scene:
+        print(f"real scene: {args.scene}  (body 1:{args.decimate}, assets={args.assets})")
+        q, s = load_real_scene(args.scene, decimate=args.decimate, assets=args.assets)
+        print(f"  total {len(q):,} scatterers")
+    elif args.xyz:
         q = load_xyz(args.xyz).astype(np.float64)
         s = np.full(len(q), 0.7)
         print(f"loaded {len(q):,} points from {args.xyz}")

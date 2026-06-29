@@ -20,9 +20,12 @@ loosely mimicking the HPR occlusion cull in the MATLAB flow.
 
 from __future__ import annotations
 
+import json
+from pathlib import Path
+
 import numpy as np
 
-__all__ = ["synthetic_body", "load_xyz"]
+__all__ = ["synthetic_body", "load_xyz", "load_real_scene"]
 
 
 def load_xyz(path) -> np.ndarray:
@@ -31,6 +34,54 @@ def load_xyz(path) -> np.ndarray:
     The file is interleaved float32 triplets; returns (N, 3)."""
     data = np.fromfile(path, dtype=np.float32)
     return data.reshape(-1, 3)
+
+
+def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
+                    standoff: float = 2.0):
+    """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
+    simulation frame.
+
+    The exported clouds are in an upright "export frame" (x=width, y=height,
+    z=depth). This reorients to the sim frame (x=width, **y=depth** at `standoff`
+    with the front facing the array, z=height centred), decimates the body by
+    `decimate`, and tags reflectivity from the body/asset JSONs.
+
+    Only assets already placed in the body frame should be passed (e.g. `phone`);
+    unplaced assets (e.g. `gun`, exported at the origin) need the place_assets
+    positioning, which is not ported. Returns (q, s).
+    """
+    folder = Path(folder)
+    body = load_xyz(folder / "body" / "body.xyz")
+    body_s = json.loads((folder / "body" / "body.json").read_text())["body"]["s"]
+
+    # centering offsets derived from the body, applied identically to assets so
+    # their placement relative to the body is preserved
+    y_mean = float(body[:, 1].mean())   # height -> centred at 0
+    z_mean = float(body[:, 2].mean())   # depth  -> centred at standoff
+
+    def reorient(p):
+        return np.column_stack([
+            p[:, 0],                          # width  (x)
+            standoff - (p[:, 2] - z_mean),    # depth  (front, +z_export, toward array)
+            p[:, 1] - y_mean,                 # height (z), centred
+        ])
+
+    qb = reorient(body)[::decimate]
+    q_list, s_list = [qb], [np.full(len(qb), body_s, np.float64)]
+
+    if assets:
+        asset_s = json.loads((folder / "assets" / "assets.json").read_text())
+        for name in assets:
+            f = folder / "assets" / f"{name}.xyz"
+            if not f.exists():
+                print(f"  (asset '{name}' not found, skipping)")
+                continue
+            pa = reorient(load_xyz(f))
+            q_list.append(pa)
+            s_list.append(np.full(len(pa), asset_s[name]["s"], np.float64))
+            print(f"  + asset '{name}': {len(pa):,} pts, s={asset_s[name]['s']}")
+
+    return np.vstack(q_list), np.concatenate(s_list)
 
 
 def _ellipsoid_front(center, radii, n, rng, oversample=3.0):
