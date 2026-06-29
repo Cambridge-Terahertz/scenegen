@@ -123,11 +123,11 @@ def _save_model_vs_recon(path, img, targ, grid, db_floor, title=""):
     for col, (name, ax, ha, va, xl, yl) in enumerate(_PROJ):
         h, v = getattr(grid, ha), getattr(grid, va)
         ext = [h[0], h[-1], v[0], v[-1]]
-        im0 = axes[0, col].imshow(mdl.max(axis=ax).T, origin="lower", aspect="auto",
+        im0 = axes[0, col].imshow(mdl.max(axis=ax).T, origin="lower", aspect="equal",
                                   cmap="viridis", extent=ext)
         axes[0, col].set_title(f"model  {name}"); axes[0, col].set_xlabel(xl); axes[0, col].set_ylabel(yl)
         fig.colorbar(im0, ax=axes[0, col], label="pts")
-        im1 = axes[1, col].imshow(db.max(axis=ax).T, origin="lower", aspect="auto",
+        im1 = axes[1, col].imshow(db.max(axis=ax).T, origin="lower", aspect="equal",
                                   cmap="jet", vmin=db_floor, vmax=0, extent=ext)
         axes[1, col].set_title(f"recon  {name}"); axes[1, col].set_xlabel(xl); axes[1, col].set_ylabel(yl)
         fig.colorbar(im1, ax=axes[1, col], label="dB")
@@ -150,7 +150,7 @@ def _save_max_projections(path, img, grid, db_floor, title=""):
     ]
     fig, axes = plt.subplots(1, 3, figsize=(15, 5))
     for ax, (name, P, h, v, xl, yl) in zip(axes, projections):
-        im = ax.imshow(P, origin="lower", aspect="auto", cmap="jet",
+        im = ax.imshow(P, origin="lower", aspect="equal", cmap="jet",
                        vmin=db_floor, vmax=0,
                        extent=[h[0], h[-1], v[0], v[-1]])
         ax.set_title(name); ax.set_xlabel(xl); ax.set_ylabel(yl)

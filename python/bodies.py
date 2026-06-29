@@ -25,7 +25,24 @@ from pathlib import Path
 
 import numpy as np
 
-__all__ = ["synthetic_body", "load_xyz", "load_real_scene"]
+__all__ = ["synthetic_body", "load_xyz", "load_real_scene", "density_weights"]
+
+
+def density_weights(q, voxel: float = 0.005) -> np.ndarray:
+    """Per-point weight ~ 1/(local point density), so each occupied voxel of
+    surface contributes equally regardless of how finely it was meshed.
+
+    Mesh exporters sample geometric detail (face, hands, folds) more densely;
+    without this, the forward sum over-weights those regions in the RF image.
+    Port of compute_density_weights_gpu.m. Returns weights scaled to mean 1.
+    """
+    g = np.floor(np.asarray(q, np.float64) / voxel).astype(np.int64)
+    g -= g.min(0)
+    dims = g.max(0) + 1
+    key = (g[:, 0] * dims[1] + g[:, 1]) * dims[2] + g[:, 2]
+    _, inv, counts = np.unique(key, return_inverse=True, return_counts=True)
+    w = 1.0 / counts[inv]
+    return w * (len(w) / w.sum())   # scale to mean 1 (relative weighting is what matters)
 
 
 def load_xyz(path) -> np.ndarray:
@@ -37,7 +54,8 @@ def load_xyz(path) -> np.ndarray:
 
 
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
-                    standoff: float = 2.0):
+                    standoff: float = 2.0, density_weight: bool = True,
+                    density_voxel: float = 0.005):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
 
@@ -81,7 +99,13 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
             s_list.append(np.full(len(pa), asset_s[name]["s"], np.float64))
             print(f"  + asset '{name}': {len(pa):,} pts, s={asset_s[name]['s']}")
 
-    return np.vstack(q_list), np.concatenate(s_list)
+    q = np.vstack(q_list)
+    s = np.concatenate(s_list)          # material reflectivity per point
+    if density_weight:
+        w = density_weights(q, density_voxel)
+        s = s * w                        # area-normalise non-uniform meshing
+        print(f"  density-weighted (voxel {density_voxel*1e3:.0f} mm)")
+    return q, s
 
 
 def _ellipsoid_front(center, radii, n, rng, oversample=3.0):
