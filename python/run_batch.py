@@ -13,6 +13,7 @@ more finish uploading), and writes a contact-sheet index at the end.
 from __future__ import annotations
 
 import argparse
+import shutil
 import time
 from pathlib import Path
 
@@ -53,6 +54,15 @@ def main() -> None:
         poses = poses[:args.limit]
     print(f"found {len(poses)} complete pose(s) under {args.scene_root}\n")
 
+    # flat folder collecting every pose's reconstruction image for easy browsing
+    gallery = output_root() / args.out_name / "all_previews"
+    gallery.mkdir(parents=True, exist_ok=True)
+
+    def collect(pose_name):
+        src = run_dir(f"{args.out_name}/{pose_name}") / "preview" / "model_vs_recon.png"
+        if src.exists():
+            shutil.copy2(src, gallery / f"{pose_name}.png")
+
     t_all = time.perf_counter()
     done = skipped = failed = 0
     for i, pose in enumerate(poses, 1):
@@ -60,6 +70,7 @@ def main() -> None:
         if run_dir(run_id).exists() and not args.redo:
             print(f"[{i}/{len(poses)}] {pose.name}: already done, skip")
             skipped += 1
+            collect(pose.name)                          # ensure gallery copy exists
             continue
         print(f"[{i}/{len(poses)}] {pose.name} -> {run_id}")
         try:
@@ -70,6 +81,7 @@ def main() -> None:
             process_and_save(q, s, run_id=run_id, source=str(pose),
                              nrx=args.nrx, nf=args.nf, precision=args.precision,
                              voxel=args.voxel, extra_meta={"pose": pose.name})
+            collect(pose.name)
             done += 1
         except Exception as e:                          # keep going on a bad pose
             print(f"  FAILED: {e}")
