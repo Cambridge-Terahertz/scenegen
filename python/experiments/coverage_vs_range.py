@@ -1,23 +1,19 @@
-"""Surface coverage vs standoff (B: recon-based) — conveyor 3.0 -> 1.5 m.
+"""Surface coverage along a trajectory (recon-based) for one clean body.
 
-Mirrors the reflect_array_imaging *measured* coverage calc, but in simulation:
-run the full coherent forward model + backprojection at each standoff, then ask
-what fraction of the body surface is actually RECOVERED in the reconstruction
-above a SEEN threshold. Because the forward model is coherent and the surface is
-densely sampled (<= ~lambda/3), specular selectivity emerges from interference --
-a patch only lights up when its specular lobe reaches the aperture -- so coverage
-grows as the body nears the sensor (the aperture subtends more, more lobes land
-on it, and resolution improves).
+Two trajectories (same coverage metric, mirrors reflect_array measured coverage):
+  --mode approach : body head-on, moves straight toward the sensor 3.0 -> 1.5 m.
+  --mode cross    : body yawed (default 30 deg, oblique 3/4 view) at a fixed
+                    depth (default 2 m), crossing laterally through the field of
+                    view. Occlusion is recomputed for the rotated body (a
+                    different surface faces the sensor at 30 deg).
 
-Method (per standoff R):
-  1. translate the (clean, no-gun) body to depth R, forward -> sig, recon -> img.
-  2. sample |img| at each front-surface point (nearest voxel) = recovered amplitude.
-  3. seen(p) = recovered(p) >= peak * 10^(SEEN_DB/20);  coverage = #seen / #surface.
+Per position: run the full coherent forward + backprojection, sample |recon| at
+each visible surface patch (nearest voxel), and report the fraction recovered
+above a SEEN threshold. Coherent dense-surface sampling reproduces specular
+selectivity, so coverage depends on which facets glint toward the aperture.
+Also reports TOTAL (union over the whole pass) coverage.
 
-Needs a GPU (run on bose). Outputs -> RA_OUTPUT_ROOT/experiments/coverage_vs_range/
-  coverage_vs_range.png   coverage % vs standoff, one line per SEEN_DB
-  bodymap_<R>m.png        front view, surface coloured by recovered dB
-  coverage_table.txt
+Needs a GPU (run on bose). Outputs -> RA_OUTPUT_ROOT/experiments/coverage_<mode>/
 """
 from __future__ import annotations
 
@@ -35,133 +31,138 @@ import raforward as rf            # noqa: E402
 from recon import backproject, C0  # noqa: E402
 from run_model import build_grid  # noqa: E402
 from results import output_root   # noqa: E402
-from bodies import load_real_scene  # noqa: E402
+from bodies import load_real_scene, zbuffer_cull  # noqa: E402
 
-STANDOFFS = [3.0, 2.625, 2.25, 1.875, 1.5]      # m (toward the sensor)
-SEEN_DB = [-3.0, -6.0, -10.0, -20.0]            # recovered-amplitude thresholds
+SEEN_DB = [-3.0, -6.0, -10.0, -20.0]
 SEEN_DB_MAP = -10.0
 
 
 def sample_nearest(img_abs, grid, pts):
-    """Nearest-voxel |img| at each 3-D point (pure numpy, no scipy)."""
-    out = np.zeros(len(pts), np.float32)
-    idx = []
-    for a, ax in enumerate((grid.xs, grid.ys, grid.zs)):
-        i = np.round((pts[:, a] - ax[0]) / (ax[1] - ax[0])).astype(np.int64)
-        i = np.clip(i, 0, len(ax) - 1)
-        idx.append(i)
-    return img_abs[idx[0], idx[1], idx[2]]
+    """Nearest-voxel |img| at each 3-D point (pure numpy)."""
+    i = [np.clip(np.round((pts[:, a] - ax[0]) / (ax[1] - ax[0])).astype(np.int64),
+                 0, len(ax) - 1)
+         for a, ax in enumerate((grid.xs, grid.ys, grid.zs))]
+    return img_abs[i[0], i[1], i[2]]
+
+
+def build_trajectory(q_full, s_full, args):
+    """Return (xlabel, invert_x, positions[(label, xval, q, s)])."""
+    if args.mode == "approach":
+        keep = zbuffer_cull(q_full, 0.003)           # visible front (head-on)
+        qv, sv = q_full[keep], s_full[keep]
+        depth0 = qv[:, 1].mean()
+        pos = []
+        for R in np.linspace(3.0, 1.5, args.n_pos):
+            q = qv.copy(); q[:, 1] += (R - depth0)
+            pos.append((f"{R:.2f} m", float(R), q, sv))
+        return "standoff (m)  — toward sensor ->", True, pos
+
+    # cross: body NOT yawed (keeps facing the sensor); its position slides along a
+    # straight path at path_deg from boresight, passing `depth` at the midpoint.
+    # The front stays the visible surface (array looks along +depth), so occlude once.
+    keep = zbuffer_cull(q_full, 0.003)
+    qv, sv = q_full[keep], s_full[keep]
+    qv = qv.copy(); qv[:, 1] += (args.depth - qv[:, 1].mean())   # midpoint at depth
+    th = np.radians(args.path_deg)
+    d = np.array([np.sin(th), np.cos(th), 0.0])      # path dir from boresight (+depth)
+    pos = []
+    for t in np.linspace(-args.extent, args.extent, args.n_pos):
+        q = qv + t * d
+        c = q.mean(0)
+        rng, look = float(np.hypot(c[0], c[1])), np.degrees(np.arctan2(c[0], c[1]))
+        pos.append((f"t={t:+.2f} (R={rng:.2f}m, {look:+.0f}deg)", float(t), q, sv))
+    return "along-path position t (m)", False, pos
 
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--pose", required=True, help="pose folder with body/body.xyz")
-    p.add_argument("--assets", nargs="*", default=[], help="clean = none (default)")
+    p.add_argument("--mode", choices=["approach", "cross"], default="approach")
+    p.add_argument("--path-deg", type=float, default=30.0,
+                   help="cross: path angle from boresight (0=head-on, 90=pure lateral)")
+    p.add_argument("--depth", type=float, default=2.0, help="cross: midpoint range [m]")
+    p.add_argument("--extent", type=float, default=1.2, help="cross: +/- along-path [m]")
+    p.add_argument("--n-pos", type=int, default=5)
     p.add_argument("--voxel", type=float, default=0.01)
     p.add_argument("--precision", choices=["fp32", "fp64"], default="fp32")
     args = p.parse_args()
 
-    out = output_root() / "experiments" / "coverage_vs_range"
+    out = output_root() / "experiments" / f"coverage_{args.mode}"
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"loading clean body: {args.pose}")
-    q0, s0 = load_real_scene(args.pose, assets=args.assets, zbuffer=True,
-                             density_weight=True)
-    depth0 = float(q0[:, 1].mean())
-    print(f"  {len(q0):,} front-surface scatterers")
+    q_full, s_full = load_real_scene(args.pose, assets=[], zbuffer=False,
+                                     density_weight=True)
+    print(f"  {len(q_full):,} points (full body)")
+
+    xlabel, invert_x, positions = build_trajectory(q_full, s_full, args)
+    q_ref = positions[0][2]                           # patch set (fixed across pass)
+    print(f"mode={args.mode}  {len(positions)} positions  "
+          f"{len(q_ref):,} visible surface patches")
 
     geom = rf.Scene.demo(ntarg=1, nrx=16_900, nf=128)
     f = geom.k * C0 / (2 * np.pi)
 
-    cover = {}      # (R, db) -> seen mask;   recov[R] -> recovered amplitude (dB) per surf pt
     recov = {}
     table = []
-    for R in STANDOFFS:
-        q = q0.copy()
-        q[:, 1] += (R - depth0)                       # move body to standoff R
-        scene = rf.Scene(q=q, s=s0, tx=geom.tx, rx=geom.rx, k=geom.k)
+    for label, xval, q, s in positions:
+        scene = rf.Scene(q=q, s=s, tx=geom.tx, rx=geom.rx, k=geom.k)
         sig = rf.forward(scene, precision=args.precision)
         grid = build_grid(q, voxel=args.voxel)
         img = backproject(sig, tx=scene.tx, rx=scene.rx, f=f, grid=grid,
                           precision=args.precision)
         if rf._HAS_CUPY:
             rf.cp.cuda.Stream.null.synchronize()
-
         img_abs = np.abs(img)
         peak = float(img_abs.max())
-        surf = sample_nearest(img_abs, grid, q)        # recovered amp at each patch
-        recov[R] = 20 * np.log10(surf / (peak + 1e-30) + 1e-30)
-        row = [R]
-        for db in SEEN_DB:
-            seen = surf >= peak * 10 ** (db / 20.0)
-            cover[(R, db)] = seen
-            row.append(100.0 * seen.mean())
+        surf = sample_nearest(img_abs, grid, q)
+        recov[xval] = 20 * np.log10(surf / (peak + 1e-30) + 1e-30)
+        row = [xval] + [100.0 * (surf >= peak * 10 ** (db / 20.0)).mean() for db in SEEN_DB]
         table.append(row)
-        print(f"  R={R:.2f} m  coverage " +
+        print(f"  {label}: " +
               " ".join(f"{db:.0f}dB:{row[1+j]:.0f}%" for j, db in enumerate(SEEN_DB)))
 
     table = np.array(table)
-
-    # union ("total") over the whole conveyor pass: best recovery per patch
-    recov_max = np.max(np.stack([recov[R] for R in STANDOFFS]), axis=0)
+    recov_max = np.max(np.stack([recov[r[0]] for r in table]), axis=0)
     union = [100.0 * (recov_max >= db).mean() for db in SEEN_DB]
 
-    # 1. coverage vs range (solid = per position; dashed = total/union over pass)
+    # 1. coverage along the trajectory (solid) + total/union (dashed)
     fig, ax = plt.subplots(figsize=(8, 5.5), dpi=130)
     for j, db in enumerate(SEEN_DB):
         ln, = ax.plot(table[:, 0], table[:, 1 + j], "o-", lw=2, label=f"seen >= {db:.0f} dB")
         ax.axhline(union[j], ls="--", lw=1, color=ln.get_color(), alpha=0.6)
     ax.plot([], [], "k--", lw=1, label="total (union over pass)")
-    ax.set_xlabel("standoff (m)   — body moving toward sensor ->")
-    ax.invert_xaxis()
-    ax.set_ylabel("surface coverage  (% of front-facing surface recovered)")
-    ax.set_title("Recon-based surface coverage vs standoff (conveyor)\n"
-                 f"clean body, coherent sim, aperture D=6.7 cm")
-    ax.set_ylim(0, 100)
-    ax.grid(alpha=0.3)
-    ax.legend()
-    fig.tight_layout()
-    fig.savefig(out / "coverage_vs_range.png")
-    plt.close(fig)
+    if invert_x:
+        ax.invert_xaxis()
+    ax.set_xlabel(xlabel)
+    ax.set_ylabel("surface coverage  (% recovered)")
+    ax.set_title(f"Recon-based coverage — {args.mode}"
+                 + (f"  (path {args.path_deg:.0f} deg, {args.depth:.1f} m)" if args.mode == "cross" else ""))
+    ax.set_ylim(0, 100); ax.grid(alpha=0.3); ax.legend()
+    fig.tight_layout(); fig.savefig(out / "coverage_vs_position.png"); plt.close(fig)
 
-    # 2. per-standoff front-view body maps coloured by recovered dB
-    for R in STANDOFFS:
-        d = recov[R]
+    # 2. per-position + union body maps (front view, coloured by recovered dB)
+    for label, xval, q, s in positions + [("UNION", None, q_ref, None)]:
+        d = recov_max if xval is None else recov[xval]
         fig, ax = plt.subplots(figsize=(4, 7), dpi=120)
-        sc = ax.scatter(q0[:, 0], q0[:, 2], c=d, s=2, cmap="inferno",
+        sc = ax.scatter(q_ref[:, 0], q_ref[:, 2], c=d, s=2, cmap="inferno",
                         vmin=SEEN_DB_MAP, vmax=0, linewidths=0)
         fig.colorbar(sc, ax=ax, label="recovered (dB)")
-        ax.set_aspect("equal")
-        ax.set_xlabel("width x (m)")
-        ax.set_ylabel("height z (m)")
+        ax.set_aspect("equal"); ax.set_xlabel("width x (m)"); ax.set_ylabel("height z (m)")
         cov = 100.0 * (d >= SEEN_DB_MAP).mean()
-        ax.set_title(f"R={R:.2f} m   coverage@{SEEN_DB_MAP:.0f}dB = {cov:.0f}%")
+        tag = "UNION over pass" if xval is None else label
+        ax.set_title(f"{tag}\ncoverage@{SEEN_DB_MAP:.0f}dB = {cov:.0f}%")
         fig.tight_layout()
-        fig.savefig(out / f"bodymap_{R:.2f}m.png")
+        fig.savefig(out / (f"bodymap_union.png" if xval is None else f"bodymap_{xval:+.2f}.png"))
         plt.close(fig)
 
-    # 2b. union body map: best recovery per patch over the whole pass
-    fig, ax = plt.subplots(figsize=(4, 7), dpi=120)
-    sc = ax.scatter(q0[:, 0], q0[:, 2], c=recov_max, s=2, cmap="inferno",
-                    vmin=SEEN_DB_MAP, vmax=0, linewidths=0)
-    fig.colorbar(sc, ax=ax, label="best recovered (dB)")
-    ax.set_aspect("equal")
-    ax.set_xlabel("width x (m)")
-    ax.set_ylabel("height z (m)")
-    ax.set_title(f"UNION over pass (3.0->1.5 m)\n"
-                 f"total coverage@{SEEN_DB_MAP:.0f}dB = {100*(recov_max >= SEEN_DB_MAP).mean():.0f}%")
-    fig.tight_layout()
-    fig.savefig(out / "bodymap_union.png")
-    plt.close(fig)
-
     # 3. table
-    lines = ["Recon-based surface coverage (% of front surface recovered)",
-             "standoff[m]  " + " ".join(f"{db:.0f}dB" for db in SEEN_DB)]
+    lines = [f"Recon-based surface coverage (% recovered) -- mode={args.mode}",
+             f"{'pos':>10s}  " + " ".join(f"{db:.0f}dB" for db in SEEN_DB)]
     for row in table:
-        lines.append(f"{row[0]:8.2f}    " + " ".join(f"{v:6.1f}" for v in row[1:]))
-    lines.append("-" * len(lines[-1]))
-    lines.append(f"{'TOTAL':>8s}    " + " ".join(f"{u:6.1f}" for u in union)
-                 + "   (union over the whole pass)")
+        lines.append(f"{row[0]:10.3f}  " + " ".join(f"{v:6.1f}" for v in row[1:]))
+    lines += ["-" * len(lines[-1]),
+              f"{'TOTAL':>10s}  " + " ".join(f"{u:6.1f}" for u in union) + "  (union over pass)"]
     (out / "coverage_table.txt").write_text("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
     print(f"\nDone. -> {out}")
