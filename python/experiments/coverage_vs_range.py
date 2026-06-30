@@ -45,6 +45,14 @@ def sample_nearest(img_abs, grid, pts):
     return img_abs[i[0], i[1], i[2]]
 
 
+def yaw(q, psi_deg, center):
+    """Rotate (width, depth) about `center` by psi (yaw about the vertical)."""
+    c, s = np.cos(np.radians(psi_deg)), np.sin(np.radians(psi_deg))
+    x, y = q[:, 0] - center[0], q[:, 1] - center[1]
+    return np.column_stack([x * c - y * s + center[0],
+                            x * s + y * c + center[1], q[:, 2]])
+
+
 def build_trajectory(q_full, s_full, args):
     """Return (xlabel, invert_x, positions[(label, xval, q, s)])."""
     if args.mode == "approach":
@@ -57,20 +65,25 @@ def build_trajectory(q_full, s_full, args):
             pos.append((f"{R:.2f} m", float(R), q, sv))
         return "standoff (m)  — toward sensor ->", True, pos
 
-    # cross: body NOT yawed (keeps facing the sensor); its position slides along a
-    # straight path at path_deg from boresight, passing `depth` at the midpoint.
-    # The front stays the visible surface (array looks along +depth), so occlude once.
-    keep = zbuffer_cull(q_full, 0.003)
-    qv, sv = q_full[keep], s_full[keep]
-    qv = qv.copy(); qv[:, 1] += (args.depth - qv[:, 1].mean())   # midpoint at depth
+    # cross: body oriented path_deg to the z/boresight axis -- it faces ALONG the
+    # path (walking direction), so body and path are parallel (both path_deg off
+    # boresight, a path_deg aspect). The body keeps that fixed orientation and
+    # slides along the straight path, crossing the boresight (x=0) at `depth` (t=0).
+    # Re-occlude once at this aspect (a path_deg-rotated surface faces the array).
+    ctr = q_full.mean(0)
+    qy = yaw(q_full, -args.path_deg, ctr)            # front turned path_deg off boresight
+    keep = zbuffer_cull(qy, 0.003)
+    qv, sv = qy[keep], s_full[keep]
+    c0 = qv.mean(0)
+    qv = qv + np.array([-c0[0], args.depth - c0[1], 0.0])   # boresight crossing at t=0
     th = np.radians(args.path_deg)
-    d = np.array([np.sin(th), np.cos(th), 0.0])      # path dir from boresight (+depth)
+    d = np.array([np.sin(th), np.cos(th), 0.0])      # path dir, path_deg off boresight
     pos = []
     for t in np.linspace(-args.extent, args.extent, args.n_pos):
         q = qv + t * d
         c = q.mean(0)
         rng, look = float(np.hypot(c[0], c[1])), np.degrees(np.arctan2(c[0], c[1]))
-        pos.append((f"t={t:+.2f} (R={rng:.2f}m, {look:+.0f}deg)", float(t), q, sv))
+        pos.append((f"t={t:+.2f} (R={rng:.2f}m, look {look:+.0f}deg)", float(t), q, sv))
     return "along-path position t (m)", False, pos
 
 
