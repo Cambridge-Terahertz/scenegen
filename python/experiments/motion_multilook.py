@@ -179,7 +179,7 @@ def main():
     for i, M in enumerate(Ms):
         lines.append(f"{M:7d} {step_deg[i]:7.2f}° {fps[i]:6.1f}  "
                      + " ".join(f"{cov_vs_m[db][i]:6.1f}" for db in SEEN_DB))
-    (out / "motion_summary.txt").write_text("\n".join(lines) + "\n")
+    (out / "motion_summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
     print("\n" + "\n".join(lines))
     print(f"\nDone. -> {out}")
 
