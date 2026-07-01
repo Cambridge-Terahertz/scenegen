@@ -29,7 +29,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 import raforward as rf                    # noqa: E402
 from recon import backproject, ReconGrid, C0  # noqa: E402
 from results import output_root           # noqa: E402
-from bodies import load_real_scene, load_xyz, place_asset, zbuffer_cull  # noqa: E402
+from bodies import load_real_scene, load_xyz, place_asset, zbuffer_cull, density_weights  # noqa: E402
 from experiments.coverage_vs_range import yaw, sample_nearest  # noqa: E402
 
 
@@ -64,6 +64,7 @@ def main():
     p.add_argument("--asset", default="gun")
     p.add_argument("--decimate", type=int, default=8)
     p.add_argument("--n-locations", type=int, default=30)
+    p.add_argument("--asset-decimate", type=int, default=6, help="thin the asset cloud")
     p.add_argument("--frames", type=int, default=17)
     p.add_argument("--path-deg", type=float, default=30.0)
     p.add_argument("--depth", type=float, default=2.0)
@@ -82,11 +83,12 @@ def main():
     # raw asset shape (centred) + its reflectivity
     apath = Path(args.pose) / "assets" / f"{args.asset}.xyz"
     ajson = Path(args.pose) / "assets" / "assets.json"
-    asset_local = load_xyz(apath).astype(np.float64)
+    asset_local = load_xyz(apath).astype(np.float64)[::args.asset_decimate]
     asset_local -= asset_local.mean(0)
     s_asset = json.loads(ajson.read_text())[args.asset]["s"]
+    w_asset = density_weights(asset_local, 0.005)      # area-normalise, like the body
     print(f"body {len(q_body):,} pts (dec {args.decimate}); {args.asset} "
-          f"{len(asset_local):,} pts s={s_asset}")
+          f"{len(asset_local):,} pts s={s_asset} (density-weighted)")
 
     geom = rf.Scene.demo(ntarg=1, nrx=16_900, nf=128)
     f = geom.k * C0 / (2 * np.pi)
@@ -124,7 +126,7 @@ def main():
     for i, tgt in enumerate(targets):
         try:
             gun = place_asset(q_body, asset_local, tgt, seed=i)
-            s_g = np.full(len(gun), s_asset)
+            s_g = s_asset * w_asset                     # area-fair against the body
             best = -np.inf
             for k, t in enumerate(ts):
                 gf = transform(gun, t)
