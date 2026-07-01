@@ -143,7 +143,8 @@ def main():
     p.add_argument("--precision", choices=["fp32", "fp64"], default="fp32")
     args = p.parse_args()
 
-    out = output_root() / "experiments" / f"coverage_{args.mode}"
+    tag = f"coverage_{args.mode}" + (f"_p{args.path_deg:.0f}" if args.mode == "cross" else "")
+    out = output_root() / "experiments" / tag
     out.mkdir(parents=True, exist_ok=True)
 
     print(f"loading clean body: {args.pose}")
@@ -156,8 +157,18 @@ def main():
     tx_pt = np.atleast_2d(geom.tx)[0]
     rx_ctr = geom.rx.mean(0)
 
-    # 1. per-patch potential (full-aspect reference scan)
-    S_full = build_potential(q0, s0, geom, f, args, tx_pt, rx_ctr)
+    # 1. per-patch potential (full-aspect reference scan) -- cached, since it is
+    # independent of the trajectory (depends only on pose/decimate/ref sweep).
+    cache = (output_root() / "experiments" / "potential_cache" /
+             f"{Path(args.pose).name}_dec{args.decimate}_r{args.ref_range:.0f}_s{args.ref_step:.2f}.npy")
+    cache.parent.mkdir(parents=True, exist_ok=True)
+    if cache.exists() and len(np.load(cache, mmap_mode="r")) == len(q0):
+        S_full = np.load(cache)
+        print(f"loaded cached potential: {cache.name}")
+    else:
+        S_full = build_potential(q0, s0, geom, f, args, tx_pt, rx_ctr)
+        np.save(cache, S_full)
+        print(f"cached potential -> {cache.name}")
     present = S_full >= S_full.max() * 10 ** (PRESENT_DB / 20.0)
     n_present = int(present.sum())
     print(f"present (potential within {PRESENT_DB:.0f} dB of peak): "
