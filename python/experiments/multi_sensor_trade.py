@@ -138,17 +138,28 @@ def main():
                  f"decimate {args.decimate}")
     fig.tight_layout(); fig.savefig(out / "trade_vs_angle.png"); plt.close(fig)
 
-    # ---- combined blind-spot map per angle ----
-    xz = (q0[present, 0], q0[present, 2])
+    # save union arrays so maps can be re-plotted without re-running the GPU work
+    np.savez(out / "unions.npz", angles=np.array(angles), present=present,
+             S_full=S_full, q0=q0, front=(body[:, 1] > 0.0),
+             **{f"u{int(a)}": unions[a] for a in angles})
+
+    # ---- FRONT / BACK split blind-spot maps per angle ----
+    front = body[:, 1] > 0.0                      # person-frame +Y = front-facing surface
     for th_deg in angles:
-        u = unions[th_deg][present]
-        rec = np.clip(20 * np.log10(u / Sp + 1e-30), -30, 0)
-        fig, ax = plt.subplots(figsize=(4, 7), dpi=120)
-        sc = ax.scatter(*xz, c=rec, s=2, cmap="inferno", vmin=-30, vmax=0, linewidths=0)
-        fig.colorbar(sc, ax=ax, label="recovered vs potential (dB)")
-        ax.set_aspect("equal"); ax.set_xlabel("width x (m)"); ax.set_ylabel("height z (m)")
-        ax.set_title(f"4-sensor union, cant {th_deg:.0f}°\ncoverage@-10dB = {cov(unions[th_deg], -10.0):.0f}%")
-        fig.tight_layout(); fig.savefig(out / f"blindmap_{th_deg:.0f}.png"); plt.close(fig)
+        rec = np.full(len(q0), -30.0)
+        rec[present] = np.clip(20 * np.log10(unions[th_deg][present] / Sp + 1e-30), -30, 0)
+        fig, axs = plt.subplots(1, 2, figsize=(8, 7), dpi=120)
+        for ax, m, tag, xs in [(axs[0], present & front, "FRONT", q0[:, 0]),
+                               (axs[1], present & ~front, "BACK", -q0[:, 0])]:
+            sc = ax.scatter(xs[m], q0[m, 2], c=rec[m], s=2, cmap="inferno",
+                            vmin=-30, vmax=0, linewidths=0)
+            c10 = 100.0 * (rec[m] >= -10).sum() / max(m.sum(), 1)
+            ax.set_aspect("equal"); ax.set_xlabel("width x (m)")
+            ax.set_title(f"{tag}\ncov@-10dB = {c10:.0f}%  ({m.sum():,} pts)")
+        axs[0].set_ylabel("height z (m)")
+        fig.colorbar(sc, ax=axs, label="recovered vs potential (dB)")
+        fig.suptitle(f"4-sensor union, cant {th_deg:.0f}°   (back mirrored L-R = viewed from behind)")
+        fig.savefig(out / f"blindmap_{th_deg:.0f}.png"); plt.close(fig)
 
     # ---- summary ----
     lines = [f"Multi-sensor portal trade -- spacing {2*args.half_spacing:.0f} m, decimate {args.decimate}, "
