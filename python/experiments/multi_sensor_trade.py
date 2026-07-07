@@ -44,6 +44,19 @@ def sensor_frame(q_world, p_s, d):
     return np.column_stack([rel @ c, rel @ d, rel[:, 2]])
 
 
+def local_front(body, cell=0.03):
+    """Per-(width,height)-cell front/back split: patches above the LOCAL mean depth
+    (person-frame +Y) are front-facing, below are back-facing. View-relevant (which
+    side faces the walk direction) and per-limb — unlike a whole-body mean split,
+    which mis-assigns limbs that sit off the body's mean depth plane."""
+    kx = np.floor(body[:, 0] / cell).astype(np.int64)
+    kz = np.floor(body[:, 2] / cell).astype(np.int64)
+    _, inv = np.unique(kx * 100003 + kz, return_inverse=True)
+    ssum = np.zeros(inv.max() + 1); cnt = np.zeros(inv.max() + 1)
+    np.add.at(ssum, inv, body[:, 1]); np.add.at(cnt, inv, 1.0)
+    return body[:, 1] > (ssum / cnt)[inv]
+
+
 def main():
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--pose", required=True)
@@ -90,7 +103,7 @@ def main():
         return 100.0 * (present & (u >= S_full * 10 ** (db / 20.0))).sum() / max(n_present, 1)
 
     angles = [float(a) for a in args.angles.split(",")]
-    results, unions = {}, {}
+    results, unions, pers = {}, {}, {}
     t0 = time.perf_counter()
     for th_deg in angles:
         th = np.radians(th_deg); sn, cs = np.sin(th), np.cos(th)
@@ -118,6 +131,7 @@ def main():
         results[th_deg] = {"union": row, "best_single": best_single,
                            "per": {n: {db: cov(per[n], db) for db in SEEN_DB} for n in per}}
         unions[th_deg] = union_all
+        pers[th_deg] = per
         print(f"theta {th_deg:.0f}: union " +
               " ".join(f"{db:.0f}dB {row[db]:.0f}%" for db in SEEN_DB) +
               f"  (best-single -10dB {best_single[-10.0]:.0f}%)  {time.perf_counter()-t0:.0f}s")
@@ -138,13 +152,15 @@ def main():
                  f"decimate {args.decimate}")
     fig.tight_layout(); fig.savefig(out / "trade_vs_angle.png"); plt.close(fig)
 
-    # save union arrays so maps can be re-plotted without re-running the GPU work
-    np.savez(out / "unions.npz", angles=np.array(angles), present=present,
-             S_full=S_full, q0=q0, front=(body[:, 1] > 0.0),
-             **{f"u{int(a)}": unions[a] for a in angles})
+    front = local_front(body)                     # view-relevant per-cell front/back split
 
-    # ---- FRONT / BACK split blind-spot maps per angle ----
-    front = body[:, 1] > 0.0                      # person-frame +Y = front-facing surface
+    # save union + per-sensor arrays so maps re-plot without re-running the GPU work
+    np.savez(out / "unions.npz", angles=np.array(angles), present=present,
+             S_full=S_full, q0=q0, front=front,
+             **{f"u{int(a)}": unions[a] for a in angles},
+             **{f"{n}__{int(a)}": pers[a][n] for a in angles for n in pers[a]})
+
+    # ---- (a) FRONT / BACK split union maps per angle (local split -> limbs correct) ----
     for th_deg in angles:
         rec = np.full(len(q0), -30.0)
         rec[present] = np.clip(20 * np.log10(unions[th_deg][present] / Sp + 1e-30), -30, 0)
@@ -160,6 +176,23 @@ def main():
         fig.colorbar(sc, ax=axs, label="recovered vs potential (dB)")
         fig.suptitle(f"4-sensor union, cant {th_deg:.0f}°   (back mirrored L-R = viewed from behind)")
         fig.savefig(out / f"blindmap_{th_deg:.0f}.png"); plt.close(fig)
+
+    # ---- (b) per-sensor "what each sensor sees" maps (each on the side it images) ----
+    sees_front = {"R-back": True, "L-back": True, "R-fwd": False, "L-fwd": False}
+    for th_deg in angles:
+        fig, axs = plt.subplots(2, 2, figsize=(9, 11), dpi=110)
+        for ax, name in zip(axs.flat, ["R-back", "L-back", "R-fwd", "L-fwd"]):
+            sf = sees_front[name]
+            m = present & (front if sf else ~front)
+            r = np.clip(20 * np.log10(pers[th_deg][name][m] / S_full[m] + 1e-30), -30, 0)
+            xs = q0[m, 0] if sf else -q0[m, 0]
+            sc = ax.scatter(xs, q0[m, 2], c=r, s=2, cmap="inferno", vmin=-30, vmax=0, linewidths=0)
+            c10 = 100.0 * (r >= -10).sum() / max(m.sum(), 1)
+            ax.set_aspect("equal")
+            ax.set_title(f"{name}  (sees {'FRONT' if sf else 'BACK'})\ncov@-10dB = {c10:.0f}%")
+        fig.colorbar(sc, ax=axs, label="recovered vs potential (dB)")
+        fig.suptitle(f"What each sensor sees — cant {th_deg:.0f}°  (back panels mirrored L-R)")
+        fig.savefig(out / f"persensor_{th_deg:.0f}.png"); plt.close(fig)
 
     # ---- summary ----
     lines = [f"Multi-sensor portal trade -- spacing {2*args.half_spacing:.0f} m, decimate {args.decimate}, "
