@@ -71,6 +71,20 @@ def main():
         fig.colorbar(sc, ax=axs, label="recovered vs potential (dB)")
         fig.suptitle(f"What each sensor sees — cant {a}°   (grey = present / other side)")
         fig.savefig(OUT / f"persensor_{a}.png"); plt.close(fig)
+
+        # TRUE blind set: patches NO sensor covers (union below threshold)
+        for thr, tag in [(-10.0, "10"), (-6.0, "6")]:
+            blind = present & (rec < thr)               # rec here = union recovered dB
+            pct = 100.0 * blind.sum() / max(present.sum(), 1)
+            fig, axs = plt.subplots(1, 2, figsize=(8, 7), dpi=120)
+            for ax, xsign, lab in [(axs[0], 1, "front view"), (axs[1], -1, "back view")]:
+                ax.scatter(xsign * q0[present, 0], q0[present, 2], s=3, c="0.85", linewidths=0)
+                ax.scatter(xsign * q0[blind, 0], q0[blind, 2], s=5, c="red", linewidths=0)
+                ax.set_aspect("equal"); ax.set_xlabel("width x (m)"); ax.set_title(lab)
+            axs[0].set_ylabel("height z (m)")
+            fig.suptitle(f"Effectively-NOT-SEEN set — cant {a}° (union < {thr:.0f} dB)\n"
+                         f"red = no sensor covers it = {pct:.1f}% of body area")
+            fig.savefig(OUT / f"trueblind_{a}_{tag}dB.png"); plt.close(fig)
         print(f"  cant {a}: done")
 
     print(f"Done. -> {OUT}")
