@@ -100,13 +100,18 @@ def main():
     lines = [f"Absolute-SNR coverage (AREA-weighted, aspect-free anchor) -- {len(q)} patches",
              f"reldb range {reldb.min():.0f}..{reldb.max():.0f} dB ; floor CoV {floor_cv:.2f}",
              "ptSNR  " + "  ".join(f">{d:.0f}dB" for d in dets)]
-    covmat = {d: [] for d in dets}
+    covmat = {d: [] for d in dets}       # AREA-weighted
+    covpt = {d: [] for d in dets}        # point-counted (for comparison)
+    lines[-1] = "ptSNR  " + "  ".join(f">{d:.0f}dB(area|pt)" for d in dets)
     for a in anchors:
         snr = reldb + a
-        row = [100.0 * (w * (snr >= d)).sum() / W for d in dets]   # AREA fraction
-        for d, v in zip(dets, row):
-            covmat[d].append(v)
-        lines.append(f"{a:6.1f}  " + "  ".join(f"{v:5.1f}" for v in row))
+        cell = []
+        for d in dets:
+            va = 100.0 * (w * (snr >= d)).sum() / W          # AREA fraction
+            vp = 100.0 * (snr >= d).mean()                   # fraction of points
+            covmat[d].append(va); covpt[d].append(vp)
+            cell.append(f"{va:4.0f}|{vp:4.0f}")
+        lines.append(f"{a:6.1f}  " + "  ".join(cell))
     txt = "\n".join(lines)
     (out / "absolute_snr.txt").write_text(txt + "\n", encoding="utf-8")
     print("\n" + txt)
@@ -114,11 +119,13 @@ def main():
     # plot 1: area-weighted coverage vs reference point-target SNR
     fig, ax = plt.subplots(figsize=(7.5, 5), dpi=130)
     for d in dets:
-        ax.plot(anchors, covmat[d], "o-", lw=2, label=f"detect > {d:.0f} dB SNR")
+        ln, = ax.plot(anchors, covmat[d], "o-", lw=2, label=f"AREA-weighted, >{d:.0f} dB")
+        ax.plot(anchors, covpt[d], "--", lw=1.3, color=ln.get_color(), alpha=0.6)
+    ax.plot([], [], "k--", lw=1.3, label="dashed = point-counted (unweighted)")
     ax.set_xlabel("reference point-target SNR (dB)  [system sensitivity to a unit isotropic scatterer]")
-    ax.set_ylabel("AREA coverage (% of body area detectable)")
-    ax.set_title("Absolute-SNR coverage — aspect-free anchor + area-weighted\n"
-                 "reference is an isotropic point target (not the body glint or a plate)")
+    ax.set_ylabel("coverage (% of body area detectable)")
+    ax.set_title("Absolute-SNR coverage — area-weighted vs point-counted\n"
+                 "aspect-free point-target anchor")
     ax.set_ylim(0, 100); ax.grid(alpha=0.3); ax.legend()
     fig.tight_layout(); fig.savefig(out / "coverage_vs_snr.png"); plt.close(fig)
 
