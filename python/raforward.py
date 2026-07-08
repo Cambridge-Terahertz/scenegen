@@ -16,7 +16,9 @@ Design (matches ``forward_model_ref.forward_fast`` exactly in float64):
     sig[f, i] = Σ_tx Σ_t  s_t / (r1·r2) · exp(-j k_f (r1 + r2))
 
 * ``r1 = |TX - q_t|`` is precomputed once (Step 2);
-* one GPU thread owns one ``(f, i)`` output → no atomics, no reduction;
+* one GPU thread owns one receiver ``i`` and a tile of ``TILE`` frequencies,
+  hoisting the frequency-independent ``r2``/amp/``r1+r2`` out of the frequency
+  loop → no atomics, no reduction, and no per-frequency distance recompute;
 * ``__sincosf`` per frequency (no recursion — the reference showed the recursion
   needs re-anchoring in float32 and ``__sincosf`` is cheap, so we skip it).
 
@@ -43,6 +45,12 @@ except Exception:  # pragma: no cover - depends on environment
 C0 = 299_792_458.0
 _TWO_PI = 2.0 * np.pi
 
+# Frequencies processed per thread (P2). A thread computes r2/amp/R once per
+# target and reuses it across this many frequencies, cutting redundant distance
+# work by (TILE-1)/TILE. 8 keeps the per-thread register arrays small (2*TILE
+# float accumulators + TILE wavenumbers); nf is typically a multiple of it.
+_TILE = 8
+
 Backend = Literal["auto", "gpu", "cpu"]
 
 __all__ = ["Scene", "forward", "C0"]
@@ -66,18 +74,32 @@ void forward_fused(
     const int ntarg, const int ntx, const int nrx, const int nf,
     float* __restrict__ sig_re, float* __restrict__ sig_im)
 {
-    const long idx = (long)blockIdx.x * blockDim.x + threadIdx.x;
-    const long total = (long)nf * nrx;
-    if (idx >= total) return;
+    // One thread owns one receiver i and a tile of TILE frequencies. r2, amp
+    // and the total path R are frequency-independent, so hoisting them out of
+    // the frequency tile removes the (TILE-1)/TILE redundant distance work of
+    // the old one-thread-per-(f,i) form.
+    const int ntiles = (nf + TILE - 1) / TILE;
+    const long tid = (long)blockIdx.x * blockDim.x + threadIdx.x;
+    const long total = (long)nrx * ntiles;
+    if (tid >= total) return;
 
-    const int f = (int)(idx / nrx);          // output is row-major (nf, nrx)
-    const int i = (int)(idx - (long)f * nrx);
+    const int i  = (int)(tid % nrx);         // receiver (adjacent tid -> coalesced)
+    const int f0 = (int)(tid / nrx) * TILE;  // first frequency of this tile
 
     const REAL_T rx0 = rxx[i], rx1 = rxy[i], rx2 = rxz[i];
-    const REAL_T k = kf[f];
     const REAL_T TWO_PI = 6.283185307179586;
 
-    float acc_re = 0.0f, acc_im = 0.0f;      // float32 accumulation
+    REAL_T kt[TILE];                         // this tile's wavenumbers
+    #pragma unroll
+    for (int j = 0; j < TILE; ++j) {
+        const int f = f0 + j;
+        kt[j] = (f < nf) ? kf[f] : (REAL_T)0; // pad freqs: computed, never written
+    }
+
+    float acc_re[TILE], acc_im[TILE];        // float32 accumulation
+    #pragma unroll
+    for (int j = 0; j < TILE; ++j) { acc_re[j] = 0.0f; acc_im[j] = 0.0f; }
+
     for (int tx = 0; tx < ntx; ++tx) {
         const REAL_T* r1p = r1all + (long)tx * ntarg;
         for (int t = 0; t < ntarg; ++t) {
@@ -86,20 +108,31 @@ void forward_fused(
             const REAL_T dz = rx2 - qz[t];
             const REAL_T r2 = SQRT_FN(dx * dx + dy * dy + dz * dz);
             const REAL_T r1 = r1p[t];
-            const REAL_T amp = (REAL_T)s[t] / (r1 * r2);
+            const float  amp = (float)((REAL_T)s[t] / (r1 * r2));  // freq-independent
+            const REAL_T R   = r1 + r2;
 
-            // phase + range reduction in REAL_T, sincos in fp32
-            REAL_T ph = -k * (r1 + r2);
-            ph = ph - TWO_PI * FLOOR_FN(ph / TWO_PI);
-            float cs, sn;
-            __sincosf((float)ph, &sn, &cs);                      // exp(j ph) = cs + j sn
-
-            acc_re += (float)amp * cs;
-            acc_im += (float)amp * sn;
+            #pragma unroll
+            for (int j = 0; j < TILE; ++j) {
+                // phase + range reduction in REAL_T, sincos in fp32
+                REAL_T ph = -kt[j] * R;
+                ph = ph - TWO_PI * FLOOR_FN(ph / TWO_PI);
+                float cs, sn;
+                __sincosf((float)ph, &sn, &cs);                  // exp(j ph) = cs + j sn
+                acc_re[j] += amp * cs;
+                acc_im[j] += amp * sn;
+            }
         }
     }
-    sig_re[idx] = acc_re;
-    sig_im[idx] = acc_im;
+
+    #pragma unroll
+    for (int j = 0; j < TILE; ++j) {
+        const int f = f0 + j;
+        if (f < nf) {
+            const long idx = (long)f * nrx + i;   // output row-major (nf, nrx)
+            sig_re[idx] = acc_re[j];
+            sig_im[idx] = acc_im[j];
+        }
+    }
 }
 """
 
@@ -119,7 +152,8 @@ def _get_kernel(precision: str):
     if precision not in _kernels:
         real, sqrt_fn, floor_fn, _ = _PRECISION[precision]
         src = (_KERNEL_TEMPLATE.replace("REAL_T", real)
-               .replace("SQRT_FN", sqrt_fn).replace("FLOOR_FN", floor_fn))
+               .replace("SQRT_FN", sqrt_fn).replace("FLOOR_FN", floor_fn)
+               .replace("TILE", str(_TILE)))
         _kernels[precision] = cp.RawKernel(src, "forward_fused")
     return _kernels[precision]
 
@@ -241,7 +275,8 @@ def _forward_gpu(scene: Scene, precision: str = "fp64") -> np.ndarray:
     sig_im = cp.zeros(nf * nrx, cp.float32)
 
     threads = 256
-    blocks = (nf * nrx + threads - 1) // threads
+    ntiles = (nf + _TILE - 1) // _TILE          # one thread per (rx, freq-tile)
+    blocks = (nrx * ntiles + threads - 1) // threads
     _get_kernel(precision)(
         (blocks,), (threads,),
         (qx, qy, qz, s, rxx, rxy, rxz, r1all, k,
