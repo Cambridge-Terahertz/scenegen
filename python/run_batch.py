@@ -19,7 +19,7 @@ from pathlib import Path
 
 import raforward as rf
 from bodies import load_real_scene
-from results import run_dir, output_root, contact_sheet
+from results import run_dir, run_complete, output_root, contact_sheet
 from run_model import process_and_save
 
 
@@ -67,7 +67,7 @@ def main() -> None:
     done = skipped = failed = 0
     for i, pose in enumerate(poses, 1):
         run_id = f"{args.out_name}/{pose.name}"
-        if run_dir(run_id).exists() and not args.redo:
+        if run_complete(run_dir(run_id)) and not args.redo:
             print(f"[{i}/{len(poses)}] {pose.name}: already done, skip")
             skipped += 1
             collect(pose.name)                          # ensure gallery copy exists

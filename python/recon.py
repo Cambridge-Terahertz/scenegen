@@ -18,6 +18,7 @@ accuracy) or fp64; GPU via CuPy, CPU via the NumPy mirror.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import warnings
 
 import numpy as np
 
@@ -127,15 +128,57 @@ def _windows(nf: int, freq_window: str) -> np.ndarray:
     raise ValueError(f"unknown freq_window: {freq_window}")
 
 
-def _range_profiles(sig: np.ndarray, f: np.ndarray, npad: int,
-                    freq_window: str, c: float):
-    """IFFT over frequency -> (nrx, npad) range profiles, plus the time axis."""
+def _range_profiles(sig, f: np.ndarray, npad: int, freq_window: str, xp):
+    """IFFT over frequency -> (nrx, npad) range profiles, plus the sample step dt.
+
+    ``xp`` is numpy or cupy. On the GPU path the FFT runs on-device and the
+    result stays on-device (complex64), so ``backproject`` hands it straight to
+    the kernel with no host round-trip and no complex128 host buffer (was a
+    ~1 GB copy at production npad*nrx). The forward model still returns ``sig``
+    on the host, so one small upload of ``sig`` (nf*nrx) remains; keeping ``sig``
+    on-device end-to-end would remove even that.
+    """
     nf, nrx = sig.shape
-    winf = _windows(nf, freq_window)
-    td = np.fft.ifft(sig * winf[:, None], n=npad, axis=0)   # (npad, nrx)
+    winf = xp.asarray(_windows(nf, freq_window), dtype=xp.float32)
+    td = xp.fft.ifft(xp.asarray(sig) * winf[:, None], n=npad, axis=0)   # (npad, nrx)
+    if xp is not np:
+        td = td.astype(xp.complex64)      # single-precision device profiles
     df = float(f[1] - f[0])
     dt = 1.0 / (df * npad)
-    return np.ascontiguousarray(td.T), dt          # (nrx, npad) C-contiguous
+    return xp.ascontiguousarray(td.T), dt          # (nrx, npad) C-contiguous
+
+
+def _check_range_ambiguity(grid, tx, rx, f, npad, c) -> None:
+    """Warn if the recon grid's round-trip path span exceeds the unambiguous
+    range window ``c/df`` (C3).
+
+    The IFFT range profile is periodic with period ``1/df`` in time, i.e.
+    ``c/df`` in total path ``(R1+R2)``. If ``max-min`` of ``(R1+R2)`` over the
+    grid approaches that window, the periodic interpolation in the kernel /
+    ``np.interp(..., period=...)`` folds distant voxels into the wrong depth
+    with no other symptom. Checked cheaply on the 8 grid corners vs all rx.
+    """
+    df = float(f[1] - f[0])
+    if df <= 0:
+        return
+    window = c / df
+    xs, ys, zs = grid.xs, grid.ys, grid.zs
+    corners = np.array([(x, y, z) for x in (xs[0], xs[-1])
+                        for y in (ys[0], ys[-1]) for z in (zs[0], zs[-1])], float)
+    R1 = np.linalg.norm(corners - np.asarray(tx), axis=1)                          # (8,)
+    R2 = np.linalg.norm(corners[:, None, :] - np.asarray(rx)[None, :, :], axis=2)  # (8, nrx)
+    tot = R1[:, None] + R2
+    span = float(tot.max() - tot.min())
+    if span >= window:
+        warnings.warn(
+            f"recon range span {span:.2f} m >= unambiguous window c/df = "
+            f"{window:.2f} m: depth WILL alias. Increase nf/bandwidth or shrink "
+            f"the grid (build_grid pad).", stacklevel=2)
+    elif span > 0.8 * window:
+        warnings.warn(
+            f"recon range span {span:.2f} m is within 80% of the unambiguous "
+            f"window c/df = {window:.2f} m: depth aliasing is marginal.",
+            stacklevel=2)
 
 
 def backproject(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray, f: np.ndarray,
@@ -150,11 +193,16 @@ def backproject(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray, f: np.ndarra
     f   : (nf,) frequencies [Hz]
     """
     tx = np.atleast_2d(tx)[0]
-    voxels = grid.voxels()
-    td, dt = _range_profiles(np.asarray(sig), np.asarray(f), npad, freq_window, c)
+    rx = np.asarray(rx)
+    f = np.asarray(f)
     f1 = float(f[0])
+    voxels = grid.voxels()
+
+    _check_range_ambiguity(grid, tx, rx, f, npad, c)   # C3: warn on depth wrap
 
     use_gpu = backend == "gpu" or (backend == "auto" and rf._HAS_CUPY)
+    xp = rf.cp if use_gpu else np
+    td, dt = _range_profiles(sig, f, npad, freq_window, xp)   # on-device when GPU (P1)
     if use_gpu:
         img = _backproject_gpu(voxels, tx, rx, td, dt, f1, c, precision)
     else:

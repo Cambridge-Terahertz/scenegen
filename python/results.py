@@ -53,6 +53,19 @@ def run_dir(run_id: str) -> Path:
     return output_root() / run_id
 
 
+def run_complete(run_dir) -> bool:
+    """True iff ``save_run`` finished for this run dir (C2).
+
+    Sentinel is ``preview/max_projections.png`` — the last artifact written
+    after ``results.h5`` is closed and ``meta.json`` is written, so its presence
+    guarantees a complete run. Testing bare directory existence is unsafe:
+    ``save_run`` mkdirs ``preview/`` *before* writing the h5, so a crash / OOM /
+    NAS hiccup mid-write leaves a directory (and a partial h5) that a plain
+    ``.exists()`` check would skip forever. This sentinel makes the batch retry.
+    """
+    return (Path(run_dir) / "preview" / "max_projections.png").exists()
+
+
 # ---------------------------------------------------------------------------
 # Save
 # ---------------------------------------------------------------------------
