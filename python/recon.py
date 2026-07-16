@@ -27,6 +27,15 @@ from raforward import C0
 
 __all__ = ["ReconGrid", "backproject", "backproject_points"]
 
+#: Default frequency taper for every public entry point. Single point of truth --
+#: ``backproject`` and ``backproject_points`` both reference this, so they cannot drift
+#: apart, and ``_windows`` below is the only place the actual coefficients live.
+#: Changed "hann" -> "taylor" 2026-07-16: hann is Pareto-dominated (narrower AND quieter
+#: alternatives exist), and its -31.5 dB sidelobes fall INSIDE the 19-33 dB dynamic range
+#: a concealed threat occupies. See ``_windows`` for the measured table.
+#: dataset1/dataset2 predate this -- pass ``freq_window="hann"`` to reproduce them.
+_DEFAULT_WINDOW = "taylor"
+
 
 # ---------------------------------------------------------------------------
 # CUDA kernel: one thread per voxel, delay-and-sum over receivers
@@ -121,11 +130,47 @@ class ReconGrid:
 
 
 def _windows(nf: int, freq_window: str) -> np.ndarray:
-    if freq_window == "hann":
+    """FREQUENCY taper -- applied along the nf axis of ``sig`` before the range IFFT
+    (see ``_range_profiles``). It therefore shapes RANGE resolution and RANGE sidelobes.
+
+    NOT to be confused with the APERTURE taper, which is a separate window the caller
+    applies across the receiver grid (``np.outer(w, w)`` over the 130x130 array) and
+    which shapes CROSS-RANGE. Two windows, two axes, chosen independently; this function
+    only knows about the frequency one.
+
+    Window shape properties (3 dB main-lobe width in BINS / highest sidelobe past the
+    first null -- both essentially independent of nf; lower is better on BOTH), and the
+    range resolution they imply here via ``dr = BW * c/2B`` with B = 30 GHz -> c/2B = 5.0 mm:
+
+        window          BW(bins)  sidelobe   range res
+        rectangular       0.906   -13.3 dB    4.53 mm
+        hann              1.469   -31.5 dB    7.35 mm   <- was default; Pareto-DOMINATED
+        taylor sll=35     1.188   -35.2 dB    5.94 mm
+        taylor sll=40     1.250   -40.1 dB    6.25 mm   <- DEFAULT: 15% narrower AND 8.6 dB lower
+        taylor sll=45     1.312   -44.2 dB    6.56 mm
+
+    ``hann`` loses on both axes at once -- taylor is narrower *and* quieter (as are
+    hamming 1.312/-42.6 and chebwin(60) 1.469/-60.0). Taylor is the standard
+    radar-imaging choice: minimum beamwidth for a specified sidelobe level.
+
+    Why sll=40 specifically: in this scene a concealed gun sits 19-33 dB below the
+    image peak, and the peak is a body glint. Hann's -31.5 dB sidelobes therefore land
+    INSIDE the target's own dynamic range -- a glint can throw a range sidelobe as bright
+    as the threat. sll=40 puts them clearly below it while still beating hann on width.
+    (The same argument applies to the aperture taper, hence the caller should match it.)
+
+    NOTE the default changed hann -> taylor on 2026-07-16. dataset1/dataset2 were
+    generated with hann; pass ``freq_window="hann"`` to reproduce them bit-for-bit.
+    """
+    if freq_window == "taylor":                     # scipy only imported if actually used
+        from scipy.signal.windows import taylor as _taylor
+        return _taylor(nf, nbar=5, sll=40, norm=False)
+    if freq_window == "hann":                       # legacy: dataset1/dataset2 provenance
         return np.hanning(nf)
     if freq_window in ("none", None):
         return np.ones(nf)
-    raise ValueError(f"unknown freq_window: {freq_window}")
+    raise ValueError(f"unknown freq_window: {freq_window!r} "
+                     f"(expected 'taylor', 'hann', or 'none')")
 
 
 def _range_profiles(sig, f: np.ndarray, npad: int, freq_window: str, xp):
@@ -182,7 +227,7 @@ def _check_range_ambiguity(grid, tx, rx, f, npad, c) -> None:
 
 
 def backproject(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray, f: np.ndarray,
-                grid: ReconGrid, npad: int = 4096, freq_window: str = "hann",
+                grid: ReconGrid, npad: int = 4096, freq_window: str = _DEFAULT_WINDOW,
                 c: float = C0, backend: str = "auto",
                 precision: str = "fp32") -> np.ndarray:
     """Reconstruct an image of shape ``grid.shape`` (complex64).
@@ -212,7 +257,7 @@ def backproject(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray, f: np.ndarra
 
 def backproject_points(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray,
                        f: np.ndarray, points: np.ndarray, npad: int = 4096,
-                       freq_window: str = "hann", c: float = C0,
+                       freq_window: str = _DEFAULT_WINDOW, c: float = C0,
                        backend: str = "auto",
                        precision: str = "fp32") -> np.ndarray:
     """Reconstruct the complex field at an arbitrary point set — flat ``(N,)``.
