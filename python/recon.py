@@ -25,7 +25,7 @@ import numpy as np
 import raforward as rf  # reuse cp, _HAS_CUPY, _PRECISION, C0
 from raforward import C0
 
-__all__ = ["ReconGrid", "backproject"]
+__all__ = ["ReconGrid", "backproject", "backproject_points"]
 
 
 # ---------------------------------------------------------------------------
@@ -210,6 +210,60 @@ def backproject(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray, f: np.ndarra
     return img.reshape(grid.shape).astype(np.complex64)
 
 
+def backproject_points(sig: np.ndarray, *, tx: np.ndarray, rx: np.ndarray,
+                       f: np.ndarray, points: np.ndarray, npad: int = 4096,
+                       freq_window: str = "hann", c: float = C0,
+                       backend: str = "auto",
+                       precision: str = "fp32") -> np.ndarray:
+    """Reconstruct the complex field at an arbitrary point set — flat ``(N,)``.
+
+    Identical matched-filter backprojection to :func:`backproject`, but evaluated
+    at the caller's ``points`` (N, 3) instead of a regular :class:`ReconGrid`, and
+    returned flat (``complex64``, no reshape). Verified equal to ``backproject`` at
+    a grid's own voxels (``test_backproject_points_matches_grid``), so a subset of
+    grid voxels is a *lossless* subset of the dense cube.
+
+    Intended use: evaluate only near the scene's surfaces -- e.g. the grid voxels
+    within +/-t in range of a z-buffer depth map -- which avoids computing and
+    storing a dense empty-space voxel volume while retaining full 3-D positions.
+
+    NOTE: do NOT pass the forward model's scatterer cloud ``q``. That cloud is
+    sampled at lambda/8 for *source quadrature* (~40M points for a body), whereas
+    the reconstruction is bandwidth/aperture-limited (~5 mm in range, ~cm in
+    cross-range). Evaluating there is ~100x redundant in cross-range and *costlier*
+    than a dense grid. Sample at image resolution instead.
+
+    sig    : (nf, nrx) measured signal
+    tx     : (3,) or (1, 3) transmitter position
+    rx     : (nrx, 3) receiver positions
+    f      : (nf,) frequencies [Hz]
+    points : (N, 3) evaluation points
+    """
+    tx = np.atleast_2d(tx)[0]
+    rx = np.asarray(rx)
+    f = np.asarray(f)
+    f1 = float(f[0])
+    points = np.ascontiguousarray(np.asarray(points, float))
+    if points.ndim != 2 or points.shape[1] != 3:
+        raise ValueError(f"points must be (N, 3), got {points.shape}")
+
+    # Reuse the grid-corner range-ambiguity check via a degenerate grid spanning
+    # the point cloud's extent (same 8-corner test, no dense voxels formed).
+    bbox = ReconGrid(xs=np.array([points[:, 0].min(), points[:, 0].max()]),
+                     ys=np.array([points[:, 1].min(), points[:, 1].max()]),
+                     zs=np.array([points[:, 2].min(), points[:, 2].max()]))
+    _check_range_ambiguity(bbox, tx, rx, f, npad, c)
+
+    use_gpu = backend == "gpu" or (backend == "auto" and rf._HAS_CUPY)
+    xp = rf.cp if use_gpu else np
+    td, dt = _range_profiles(sig, f, npad, freq_window, xp)
+    if use_gpu:
+        img = _backproject_gpu(points, tx, rx, td, dt, f1, c, precision)
+    else:
+        img = _backproject_numpy(points, tx, rx, td, dt, f1, c)
+    return img.astype(np.complex64)
+
+
 def _backproject_numpy(voxels, tx, rx, td, dt, f1, c) -> np.ndarray:
     """CPU mirror: periodic complex interp + carrier, summed over receivers."""
     npad = td.shape[1]
@@ -284,6 +338,25 @@ def test_psf_focuses_at_target():
     peak = _peak_location(img, grid)
     err = np.linalg.norm(peak - target)
     assert err < 0.04, f"PSF peak {peak} vs target {target} (err {err:.3f} m)"
+
+
+def test_backproject_points_matches_grid():
+    """backproject_points at a grid's own voxels == backproject (same kernel)."""
+    target = np.array([0.05, 2.0, -0.1])
+    scene = _psf_scene(target)
+    f = scene.k * C0 / (2 * np.pi)
+    sig = rf.forward(scene, backend="cpu")
+    grid = ReconGrid(xs=np.linspace(-0.2, 0.2, 21),
+                     ys=np.linspace(1.85, 2.15, 15),
+                     zs=np.linspace(-0.3, 0.3, 31))
+    img_grid = backproject(sig, tx=scene.tx, rx=scene.rx, f=f, grid=grid,
+                           npad=2048, backend="cpu")
+    pts = grid.voxels()
+    img_pts = backproject_points(sig, tx=scene.tx, rx=scene.rx, f=f, points=pts,
+                                 npad=2048, backend="cpu")
+    assert img_pts.shape == (pts.shape[0],)
+    # grid.voxels() is the exact order backproject flattens before reshape.
+    assert _relerr(img_pts, img_grid.ravel()) < 1e-6, "points vs grid mismatch"
 
 
 def _relerr(a, b) -> float:
