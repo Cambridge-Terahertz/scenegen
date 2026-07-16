@@ -40,3 +40,7 @@ venv/
 
 # ---- Conda / local envs on the server ----
 miniconda3/
+
+# ---- SMPL-X model assets (1.9 GB; licence-restricted, redistribution prohibited) ----
+# Canonical location for the v1.1 assets -- fetch from the SMPL-X site, never commit.
+smplx_models/
