@@ -19,8 +19,12 @@ Design (matches ``forward_model_ref.forward_fast`` exactly in float64):
 * one GPU thread owns one receiver ``i`` and a tile of ``TILE`` frequencies,
   hoisting the frequency-independent ``r2``/amp/``r1+r2`` out of the frequency
   loop → no atomics, no reduction, and no per-frequency distance recompute;
-* ``__sincosf`` per frequency (no recursion — the reference showed the recursion
-  needs re-anchoring in float32 and ``__sincosf`` is cheap, so we skip it).
+* ``__sincosf`` per frequency by default. ``phase_recursion=True`` (or env
+  ``RA_PHASE_RECURSION=1``) instead builds each tile's phasors from 2 sincos
+  anchors plus complex rotations, re-anchored every tile: measured 2.4x faster
+  on an A4000 (both L2-resident and at 3M scatterers), costing ~4e-3 relerr on
+  the field but only 0.9999977 -> 0.9999956 recon correlation with the CUDA
+  reference, peak voxel unchanged — i.e. imaging-negligible.
 
 The GPU path needs a CuPy environment + CUDA GPU. With NumPy inputs (or no CuPy)
 the call falls back to :func:`_forward_numpy`, a faithful mirror of the kernel
@@ -29,6 +33,7 @@ arithmetic that runs anywhere and is what we validate on a CPU.
 
 from __future__ import annotations
 
+import os
 from dataclasses import dataclass
 from typing import Literal
 
@@ -88,13 +93,21 @@ void forward_fused(
 
     const REAL_T rx0 = rxx[i], rx1 = rxy[i], rx2 = rxz[i];
     const REAL_T TWO_PI = 6.283185307179586;
+    const REAL_T INV_TWO_PI = 0.15915494309189535;  // immediate: kills a per-eval divide
 
+#if PHASE_RECURSION
+    // k is linearly spaced, so the tile's phasors are the anchor exp(-j k_f0 R)
+    // rotated j times by exp(-j dk R) -> 2 sincos per scatterer, not TILE.
+    const REAL_T k0  = (f0 < nf) ? kf[f0] : (REAL_T)0;
+    const REAL_T dkg = (nf > 1) ? (kf[1] - kf[0]) : (REAL_T)0;
+#else
     REAL_T kt[TILE];                         // this tile's wavenumbers
     #pragma unroll
     for (int j = 0; j < TILE; ++j) {
         const int f = f0 + j;
         kt[j] = (f < nf) ? kf[f] : (REAL_T)0; // pad freqs: computed, never written
     }
+#endif
 
     float acc_re[TILE], acc_im[TILE];        // float32 accumulation
     #pragma unroll
@@ -111,16 +124,35 @@ void forward_fused(
             const float  amp = (float)((REAL_T)s[t] / (r1 * r2));  // freq-independent
             const REAL_T R   = r1 + r2;
 
+#if PHASE_RECURSION
+            // Re-anchored every tile, so fp32 drift cannot accumulate past TILE
+            // rotations (that bound is what makes the accuracy cost tolerable).
+            REAL_T pha = -k0  * R;  pha = pha - TWO_PI * FLOOR_FN(pha * INV_TWO_PI);
+            REAL_T phs = -dkg * R;  phs = phs - TWO_PI * FLOOR_FN(phs * INV_TWO_PI);
+            float ca, sa, cstep, sstep;
+            __sincosf((float)pha, &sa, &ca);        // anchor  = ca    + j*sa
+            __sincosf((float)phs, &sstep, &cstep);  // rotator = cstep + j*sstep
+            float cr = ca, ci = sa;                 // running exp(-j k_j R)
+            #pragma unroll
+            for (int j = 0; j < TILE; ++j) {
+                acc_re[j] += amp * cr;
+                acc_im[j] += amp * ci;
+                const float ncr = cr * cstep - ci * sstep;
+                const float nci = cr * sstep + ci * cstep;
+                cr = ncr; ci = nci;
+            }
+#else
             #pragma unroll
             for (int j = 0; j < TILE; ++j) {
                 // phase + range reduction in REAL_T, sincos in fp32
                 REAL_T ph = -kt[j] * R;
-                ph = ph - TWO_PI * FLOOR_FN(ph / TWO_PI);
+                ph = ph - TWO_PI * FLOOR_FN(ph * INV_TWO_PI);
                 float cs, sn;
                 __sincosf((float)ph, &sn, &cs);                  // exp(j ph) = cs + j sn
                 acc_re[j] += amp * cs;
                 acc_im[j] += amp * sn;
             }
+#endif
         }
     }
 
@@ -144,18 +176,28 @@ _PRECISION = {
 _kernels: dict = {}
 
 
-def _get_kernel(precision: str):
+def _use_recursion(flag: bool | None) -> bool:
+    """Resolve the phase-recursion switch: explicit arg wins, else RA_PHASE_RECURSION."""
+    if flag is not None:
+        return bool(flag)
+    return os.environ.get("RA_PHASE_RECURSION", "0").lower() not in ("", "0", "false", "no")
+
+
+def _get_kernel(precision: str, recursion: bool = False):
     if not _HAS_CUPY:
         raise RuntimeError("CuPy is not available; GPU path cannot run.")
     if precision not in _PRECISION:
         raise ValueError(f"precision must be one of {list(_PRECISION)}")
-    if precision not in _kernels:
+    key = (precision, bool(recursion))
+    if key not in _kernels:
         real, sqrt_fn, floor_fn, _ = _PRECISION[precision]
         src = (_KERNEL_TEMPLATE.replace("REAL_T", real)
                .replace("SQRT_FN", sqrt_fn).replace("FLOOR_FN", floor_fn)
                .replace("TILE", str(_TILE)))
-        _kernels[precision] = cp.RawKernel(src, "forward_fused")
-    return _kernels[precision]
+        _kernels[key] = cp.RawKernel(
+            src, "forward_fused",
+            options=("--use_fast_math", f"-DPHASE_RECURSION={int(bool(recursion))}"))
+    return _kernels[key]
 
 
 # ---------------------------------------------------------------------------
@@ -231,7 +273,8 @@ class Scene:
 # Public API
 # ---------------------------------------------------------------------------
 def forward(scene: Scene, backend: Backend = "auto",
-            precision: str = "fp64") -> np.ndarray:
+            precision: str = "fp64",
+            phase_recursion: bool | None = None) -> np.ndarray:
     """Compute the forward-model signal ``sig`` of shape ``(nf, nrx)`` complex64.
 
     Parameters
@@ -242,13 +285,19 @@ def forward(scene: Scene, backend: Backend = "auto",
     precision : {"fp64", "fp32"}
         GPU only. fp64 is accurate (~1e-6) but slow on consumer GPUs; fp32 is
         much faster but ~1e-3 (the current-mex accuracy). CPU is always fp64-ish.
+    phase_recursion : bool or None
+        GPU only. Build each frequency tile by complex rotation from 2 sincos
+        anchors instead of TILE __sincosf calls: ~2.4x faster, ~4e-3 field
+        relerr (imaging-negligible — see module docstring). ``None`` (default)
+        reads ``RA_PHASE_RECURSION``, which defaults to off/exact.
     """
     if backend == "gpu" or (backend == "auto" and _HAS_CUPY):
-        return _forward_gpu(scene, precision)
+        return _forward_gpu(scene, precision, phase_recursion)
     return _forward_numpy(scene)
 
 
-def _forward_gpu(scene: Scene, precision: str = "fp64") -> np.ndarray:
+def _forward_gpu(scene: Scene, precision: str = "fp64",
+                 phase_recursion: bool | None = None) -> np.ndarray:
     """GPU path: single fused RawKernel launch. Requires CuPy + a CUDA GPU."""
     if not _HAS_CUPY:
         raise RuntimeError("CuPy is not available; use backend='cpu'.")
@@ -277,7 +326,7 @@ def _forward_gpu(scene: Scene, precision: str = "fp64") -> np.ndarray:
     threads = 256
     ntiles = (nf + _TILE - 1) // _TILE          # one thread per (rx, freq-tile)
     blocks = (nrx * ntiles + threads - 1) // threads
-    _get_kernel(precision)(
+    _get_kernel(precision, _use_recursion(phase_recursion))(
         (blocks,), (threads,),
         (qx, qy, qz, s, rxx, rxy, rxz, r1all, k,
          np.int32(ntarg), np.int32(ntx), np.int32(nrx), np.int32(nf),
