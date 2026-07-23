@@ -82,6 +82,8 @@ def main() -> None:
                    help="occlusion cell size [m]; coarse so front/back share a cell")
     p.add_argument("--no-density-weight", action="store_true",
                    help="don't area-normalise non-uniform meshing")
+    p.add_argument("--orient-correct", action="store_true",
+                   help="divide density weights by the per-voxel |n|_1 (needs normals)")
     p.add_argument("--xyz", help="single real .xyz cloud")
     p.add_argument("--n-points", type=int, default=200_000)
     p.add_argument("--no-asset", action="store_true")
@@ -97,7 +99,8 @@ def main() -> None:
         print(f"real scene: {args.scene}  (body 1:{args.decimate}, assets={args.assets})")
         q, s = load_real_scene(args.scene, decimate=args.decimate, assets=args.assets,
                                zbuffer=not args.no_zbuffer, zbuffer_pixel=args.zbuffer_pixel,
-                               density_weight=not args.no_density_weight)
+                               density_weight=not args.no_density_weight,
+                               orient_correct=args.orient_correct)
         source = args.scene
         print(f"  total {len(q):,} scatterers")
     elif args.xyz:

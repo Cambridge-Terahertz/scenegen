@@ -96,13 +96,21 @@ def zbuffer_cull(q, pixel: float = 0.003, depth_axis: int = 1,
     return np.where(q[:, depth_axis] <= cmin[inv] + keep_depth)[0]
 
 
-def density_weights(q, voxel: float = 0.005) -> np.ndarray:
+def density_weights(q, voxel: float = 0.005, normals=None) -> np.ndarray:
     """Per-point weight ~ 1/(local point density), so each occupied voxel of
     surface contributes equally regardless of how finely it was meshed.
 
     Mesh exporters sample geometric detail (face, hands, folds) more densely;
     without this, the forward sum over-weights those regions in the RF image.
     Port of compute_density_weights_gpu.m. Returns weights scaled to mean 1.
+
+    Orientation fallback (`normals` given, per-point unit vectors): plain voxel
+    occupancy counts an oblique sheet as |n_x|+|n_y|+|n_z| (up to sqrt(3)) times its
+    true area -- the digital L1 surface-measure bias (Mullikin & Verbeek 1993). Given
+    normals, each voxel's contribution is divided by the L1 norm of its mean normal,
+    cancelling that factor exactly on locally planar patches. Clamped to [1, sqrt(3)]
+    so curved / opposing-normal voxels are never amplified. Does NOT fix the sub-voxel
+    fold under-count (that needs a manifold-intrinsic per-point area).
     """
     g = np.floor(np.asarray(q, np.float64) / voxel).astype(np.int64)
     g -= g.min(0)
@@ -110,7 +118,49 @@ def density_weights(q, voxel: float = 0.005) -> np.ndarray:
     key = (g[:, 0] * dims[1] + g[:, 1]) * dims[2] + g[:, 2]
     _, inv, counts = np.unique(key, return_inverse=True, return_counts=True)
     w = 1.0 / counts[inv]
+    if normals is not None:
+        n = np.asarray(normals, np.float64)
+        n = n / np.linalg.norm(n, axis=1, keepdims=True)         # ensure unit
+        mean_n = np.zeros((len(counts), 3))
+        np.add.at(mean_n, inv, n)                                # per-voxel sum of normals
+        mean_n /= counts[:, None]                                # -> mean normal
+        l1 = np.clip(np.abs(mean_n).sum(1), 1.0, np.sqrt(3.0))   # voxel-crossing factor
+        w = w / l1[inv]                                          # divide out the over-count
     return w * (len(w) / w.sum())   # scale to mean 1 (relative weighting is what matters)
+
+
+def estimate_normals(q, k: int = 24, view_dir=(0.0, -1.0, 0.0),
+                     chunk: int = 200_000) -> np.ndarray:
+    """Per-point unit surface normals via local PCA -- the smallest principal axis of
+    each point's k nearest neighbours (Hoppe et al. 1992). Signs are oriented toward the
+    sensor (`view_dir` points from the surface toward the array; -y in the sim frame),
+    so normals are CONSISTENT within a voxel -- required by the density_weights
+    orientation fallback, which averages normals per voxel and would otherwise cancel.
+
+    Uses a GPU KDTree (cupyx) when CuPy is present, else scipy's cKDTree; PCA is chunked
+    to bound memory. O(N log N). Returns (N, 3) unit vectors.
+    """
+    q = np.asarray(q, np.float64)
+    n = np.empty_like(q)
+    try:
+        import cupy as cp
+        from cupyx.scipy.spatial import KDTree
+        tree = KDTree(cp.asarray(q))
+        query = lambda pts: cp.asnumpy(tree.query(cp.asarray(pts), k=k)[1])
+    except Exception:
+        from scipy.spatial import cKDTree
+        tree = cKDTree(q)
+        query = lambda pts: tree.query(pts, k=k, workers=-1)[1]
+    for i in range(0, len(q), chunk):
+        idx = query(q[i:i + chunk])                    # (m, k) neighbour indices
+        nb = q[idx]                                     # (m, k, 3)
+        nb = nb - nb.mean(1, keepdims=True)
+        cov = np.einsum("mki,mkj->mij", nb, nb)         # (m, 3, 3) scatter
+        n[i:i + chunk] = np.linalg.eigh(cov)[1][:, :, 0]   # smallest eigvec -> normal
+    vd = np.asarray(view_dir, np.float64); vd /= np.linalg.norm(vd)
+    flip = (n @ vd) < 0
+    n[flip] = -n[flip]                                  # orient toward the array
+    return n / np.linalg.norm(n, axis=1, keepdims=True)
 
 
 def load_xyz(path) -> np.ndarray:
@@ -124,7 +174,8 @@ def load_xyz(path) -> np.ndarray:
 def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
                     standoff: float = 2.0, zbuffer: bool = True,
                     zbuffer_pixel: float = 0.003, density_weight: bool = True,
-                    density_voxel: float = 0.005, placements=None):
+                    density_voxel: float = 0.005, orient_correct: bool = False,
+                    placements=None):
     """Load `<folder>/body/body.xyz` + placed asset clouds and put them in the
     simulation frame.
 
@@ -192,9 +243,11 @@ def load_real_scene(folder, *, decimate: int = 1, assets=("phone",),
         print(f"  z-buffer cull (pixel {zbuffer_pixel*1e3:.1f} mm): "
               f"{len(keep):,} front-surface pts")
     if density_weight:
-        w = density_weights(q, density_voxel)
+        normals = estimate_normals(q) if orient_correct else None
+        w = density_weights(q, density_voxel, normals=normals)
         s = s * w                        # area-normalise non-uniform meshing
-        print(f"  density-weighted (voxel {density_voxel*1e3:.0f} mm)")
+        print(f"  density-weighted (voxel {density_voxel*1e3:.0f} mm"
+              f"{', orientation-corrected' if orient_correct else ''})")
     return q, s
 
 
