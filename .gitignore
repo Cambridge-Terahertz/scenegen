@@ -1,0 +1,16 @@
+__pycache__/
+*.pyc
+*.pyo
+*.npz
+*.npy
+*.png
+*.jpg
+*.jpeg
+*.log
+*.xyz
+.DS_Store
+# large regenerable meshes (objects_v5 rebuilt by process_objects.py); manifests kept
+objects_v5/*.obj
+objects_v5/*.mtl
+# gallery render outputs
+objprep/gallery_imgs/

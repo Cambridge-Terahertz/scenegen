@@ -1,0 +1,240 @@
+{
+  "phone": {
+    "ok": [
+      "wb_front_mid",
+      "wb_front_l",
+      "wb_front_r",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "thigh_outer_l",
+      "thigh_outer_r"
+    ],
+    "no": [
+      "flank_l",
+      "flank_r",
+      "belly",
+      "chest",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ],
+    "maybe": [
+      "wb_back_mid",
+      "small_of_back"
+    ]
+  },
+  "wallet": {
+    "ok": [
+      "wb_front_mid",
+      "wb_back_mid",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "small_of_back",
+      "thigh_outer_l",
+      "thigh_outer_r"
+    ],
+    "no": [
+      "belly",
+      "chest",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ],
+    "maybe": [
+      "wb_front_l",
+      "wb_front_r",
+      "flank_l",
+      "flank_r"
+    ]
+  },
+  "badge": {
+    "ok": [
+      "wb_front_mid",
+      "wb_front_l",
+      "wb_front_r",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "belly",
+      "chest",
+      "upper_back"
+    ],
+    "no": [
+      "wb_back_mid",
+      "small_of_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ],
+    "maybe": [
+      "flank_l",
+      "flank_r",
+      "thigh_outer_l",
+      "thigh_outer_r"
+    ]
+  },
+  "keys": {
+    "ok": [
+      "wb_front_mid",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "belly",
+      "small_of_back",
+      "thigh_outer_l",
+      "thigh_outer_r"
+    ],
+    "no": [
+      "flank_l",
+      "flank_r",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ],
+    "maybe": [
+      "wb_front_l",
+      "wb_front_r",
+      "wb_back_mid",
+      "chest"
+    ]
+  },
+  "necklace": {
+    "ok": [
+      "belly",
+      "chest"
+    ],
+    "no": [
+      "flank_l",
+      "flank_r",
+      "wb_back_mid",
+      "small_of_back",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "thigh_outer_l",
+      "thigh_outer_r",
+      "ankle_l",
+      "ankle_r"
+    ],
+    "maybe": [
+      "wb_front_mid",
+      "wb_front_l",
+      "wb_front_r",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ]
+  },
+  "belt": {
+    "ok": [
+      "wb_front_mid",
+      "wb_front_l",
+      "wb_front_r",
+      "wb_l",
+      "wb_r"
+    ],
+    "no": [
+      "flank_l",
+      "flank_r",
+      "wb_back_mid",
+      "wb_back_l",
+      "wb_back_r",
+      "belly",
+      "chest",
+      "small_of_back",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "thigh_outer_l",
+      "thigh_outer_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r"
+    ],
+    "maybe": [
+      "shin_l",
+      "shin_r"
+    ]
+  },
+  "phone_modern": {
+    "ok": [
+      "wb_front_mid",
+      "wb_front_l",
+      "wb_front_r",
+      "wb_back_l",
+      "wb_back_r",
+      "wb_l",
+      "wb_r",
+      "thigh_outer_l",
+      "thigh_outer_r"
+    ],
+    "no": [
+      "flank_l",
+      "flank_r",
+      "belly",
+      "chest",
+      "upper_back",
+      "thigh_inner_l",
+      "thigh_inner_r",
+      "ankle_l",
+      "ankle_r",
+      "upper_arm_l",
+      "upper_arm_r",
+      "forearm_l",
+      "forearm_r",
+      "shin_l",
+      "shin_r"
+    ],
+    "maybe": [
+      "wb_back_mid",
+      "small_of_back"
+    ]
+  }
+}

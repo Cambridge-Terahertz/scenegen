@@ -1,0 +1,62 @@
+[
+  {
+    "name": "phone",
+    "file": "phone.stl",
+    "kind": "benign",
+    "material_s": 0.9,
+    "conformal": false,
+    "verts": 26,
+    "faces": 48,
+    "dims_cm": [
+      16.3,
+      7.8,
+      0.8
+    ],
+    "note": "iPhone 16 Pro Max, true dims 163x77.6x8.25mm; CAD scene unusable -> rounded slab"
+  },
+  {
+    "name": "wallet",
+    "file": "wallet.stl",
+    "kind": "benign",
+    "material_s": 0.3,
+    "conformal": true,
+    "verts": 7498,
+    "faces": 11206,
+    "dims_cm": [
+      11.0,
+      9.0,
+      1.1
+    ],
+    "note": "bifold wallet CAD, rescaled to 11cm long, conformal"
+  },
+  {
+    "name": "buckle",
+    "file": "buckle.stl",
+    "kind": "benign",
+    "material_s": 1.0,
+    "conformal": false,
+    "verts": 863,
+    "faces": 1500,
+    "dims_cm": [
+      7.5,
+      7.0,
+      3.9
+    ],
+    "note": "belt buckle CAD, steel, 7.5cm"
+  },
+  {
+    "name": "name_badge",
+    "file": "name_badge.stl",
+    "kind": "benign",
+    "material_s": 0.35,
+    "conformal": true,
+    "verts": 5040,
+    "faces": 8480,
+    "dims_cm": [
+      9.0,
+      5.0,
+      1.1
+    ],
+    "note": "one badge assembly isolated from the set, 9cm"
+  }
+]
