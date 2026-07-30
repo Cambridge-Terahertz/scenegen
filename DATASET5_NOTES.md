@@ -70,3 +70,29 @@ gun_* aliases on threats, and raw `sig` every 128th scan. Standoff 2.0 m, taylor
 ## TODO
 - When generation completes: **rsync `tesla:~/dataset5_2026-07-24` → NAS** `Jonah/synthetic_data/`.
 - Then run the detection analysis (reuse the dataset4 pipeline: features → GroupKFold → site-matched).
+
+## PERFORMANCE TODO — port two validated speedups from the walkthrough dataset (2026-07-30)
+
+Both were measured on `walkthrough_dataset_driver.py` (moving-portal dataset, same dataset5 delta-forward
+physics) and produce **bit-identical output** (max|delta|/peak = 0.00e+00). dataset5 does the same full-grid
+recon + full-cloud per-placement occlusion on 83k scans, so both should give a large end-to-end speedup.
+Reference impl: `~/Documents/scratch_results/smplx/walkthrough_dataset_driver.py`.
+
+1. **Shell-only reconstruction via `recon.backproject_points`.** Today `recon_complex()` backprojects the
+   full dense grid (181 x Ny x 211 ~ 4M voxels) and `gate()` then keeps only the +/-5 cm surface shell
+   (~100k pts), discarding ~97%. Instead, compute the shell eval points from `depth_map` (for each finite
+   cell ix,iz: KGATE range samples about the surface) and call `backproject_points(sig*W, ..., points=shell)`
+   -- returns the identical `field_gated`/`gate_cells` (test-verified vs grid). `han_db` becomes the per-cell
+   shell max (matches the full max-projection within ~0.5 dB). ~40x cheaper backproject.
+
+2. **Localized occlusion.** Today each placement does `q_all = vstack([bq ~40M body pts, gq]); zbuffer_cull(q_all)`
+   -- re-culls the WHOLE body cloud per object; on the walkthrough this was 65% of per-placement time.
+   Instead cull only body points inside the object's cross-range footprint (bbox of `gq` + ~1 cm margin,
+   AND-ed with the body-only `keep_b0`): `near = keep_b0 & in_footprint; zbuffer_cull(vstack([bq[near], gq]))`.
+   EXACT -- a body point outside the object footprint shares no zbuffer cell with any object point (so its
+   visibility is unchanged), and no far body point can shadow the object. Cut occlusion 278s to 34s (8x) for
+   36 placements, bit-identical.
+
+Net on the walkthrough: per-placement 20 s to 5 s (4x). A third idea -- folding the shadow-subtract +
+object-add into one `fwd([shadow;object],[-skin;s_obj])` call -- is correct but gave ~0 speedup there since
+the forward was not the bottleneck; low priority.
