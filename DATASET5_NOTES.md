@@ -96,3 +96,41 @@ Reference impl: `~/Documents/scratch_results/smplx/walkthrough_dataset_driver.py
 Net on the walkthrough: per-placement 20 s to 5 s (4x). A third idea -- folding the shadow-subtract +
 object-add into one `fwd([shadow;object],[-skin;s_obj])` call -- is correct but gave ~0 speedup there since
 the forward was not the bottleneck; low priority.
+
+---
+
+## Coordinate frame (adopted 2026-08-26) — read this before touching any driver
+
+**`+z` into the scene with z = 0 at the array · `+y` up · `+x` to the LEFT · right-handed.**
+Stated once in `frame.py`; matches `reflect_array_imaging/processing/bistatic_recon.py`, so a
+simulated scan and a DK3 scan share one frame. The legacy sim frame was (x = array-right,
+y = RANGE, z = vertical); `frame.legacy_to_world` converts, determinant +1.
+
+**Plot rule:** always draw +x leftward (`ax.invert_xaxis()`). Negating x and inverting the axis
+cancel, so figures look unchanged — what changes is the axis sign and labels. Applying only ONE of
+the two silently mirrors the figure, so every `set_xlim` must pass reversed bounds.
+
+**Reading old data:** ds3–ds5b and the ds6 pilot are legacy-frame. They stay readable — each npz
+carries its own `xs/ys/zs` — but world-frame code will silently mis-index them. **Always read via
+`frame.load_scan()`**, or call `frame.assert_frame()`.
+
+**model_gen is frame-agnostic; the PIPELINE IS NOT.** `backproject` takes a point set and only forms
+Euclidean distances (permuting the frame moves fp64 results by 5.99e-08). But three things outside
+model_gen are axis-aware and must be given the right axis, or they silently corrupt every scan
+(measured: 20% fewer visible points, 20° obliquity error, contrast inflated 5 dB):
+
+| call | legacy default | world value |
+|---|---|---|
+| `bodies.zbuffer_cull(q, …, depth_axis=1)` | axis 1 | **`depth_axis=2`** |
+| `attach.front_cull(…, view_dir=(0,-1,0))` | −y | **`(0, 0, -1)`** |
+| `obliquity_deg` reads `gn[:,1]` | col 1 | **`gn[:,2]`** |
+
+**Validating a frame change:** never by bit-comparison in fp32. This is interferometry at λ≈1 mm
+over r≈2 m (~2000 wavelengths), so fp32 phase round-off moves results ~1e-3 relative (0.0088 dB)
+purely from reordering `dx²+dy²+dz²`. Use fp64, or a 1e-3 tolerance. Reference tests:
+`analysis_ds6/phase0*.py` (invariance), `parity.py` (driver), `loadertest.py` (loader),
+`p3test.py` (packers).
+
+**AWS:** the ECR image BAKES the driver, and `aws_ds6/build.sh` must copy `frame.py` next to it
+(the driver imports it by path). `submit.sh` now REFUSES to submit when the driver is newer than
+the pushed image — override only with `FORCE_STALE=1`.

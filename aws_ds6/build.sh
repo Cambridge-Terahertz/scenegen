@@ -17,7 +17,10 @@ REPO=thz-dataset6
 BUCKET=thz-walkthrough-${ACCT}
 ECR=${ACCT}.dkr.ecr.${REGION}.amazonaws.com
 CTX=${HOME}/ds6_build
-SRC_DIRS=("${HOME}/probe" "${HOME}/walkthrough" "${HOME}/threat_dataset")
+SRC_DIRS=("$HOME/scenegen" "$HOME/probe" "$HOME/walkthrough" "$HOME/threat_dataset")
+# scenegen FIRST: the image should be built from the repo, not from whichever scattered
+# working copy happens to be newest. The other dirs remain as fallbacks for assets the
+# repo does not track (STLs, shapes json).
 MG=${HOME}/Documents/code/model_gen/python
 WHAT=${1:-all}
 

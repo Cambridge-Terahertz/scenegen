@@ -57,14 +57,40 @@ submit() {                                  # submit <name> <n_bodies> [extra-en
     --query '[jobName,jobId]' --output text
 }
 
+# ---------------------------------------------------------------- staleness guard ----
+# The image BAKES the driver. A stale image runs old code while everything else has moved on --
+# which is exactly how a frame migration would silently produce 266,000 wrong-frame scans. Compare
+# the pushed image against the driver's mtime and refuse rather than warn.
+check_fresh() {
+  local drv="$(cd "$(dirname "$0")" && pwd)/../dataset6_driver.py"
+  [ -f "$drv" ] || return 0
+  local pushed drv_epoch img_epoch
+  pushed=$("$AWS" ecr describe-images --repository-name "$REPO" --region "$REGION" \
+           --query 'sort_by(imageDetails,&imagePushedAt)[-1].imagePushedAt' --output text 2>/dev/null) || return 0
+  [ -z "$pushed" ] || [ "$pushed" = None ] && return 0
+  img_epoch=$(date -j -f "%Y-%m-%dT%H:%M:%S" "${pushed%%.*}" +%s 2>/dev/null \
+              || date -d "${pushed%%.*}" +%s 2>/dev/null) || return 0
+  drv_epoch=$(stat -f %m "$drv" 2>/dev/null || stat -c %Y "$drv")
+  if [ "$drv_epoch" -gt "$img_epoch" ]; then
+    echo "REFUSING: dataset6_driver.py is newer than the pushed ECR image." >&2
+    echo "  driver $(date -r "$drv_epoch" 2>/dev/null || date -d @"$drv_epoch")" >&2
+    echo "  image  $pushed" >&2
+    echo "  Rebuild first:  ssh tesla 'cd ~/scenegen/aws_ds6 && bash build.sh'" >&2
+    echo "  Override with FORCE_STALE=1 only if you know the difference does not matter." >&2
+    [ "${FORCE_STALE:-0}" = 1 ] || exit 2
+  fi
+}
+
 case "$WHAT" in
   register) echo "registered revision $(register)" ;;
   smoke)
+    check_fresh
     register >/dev/null
     # 3 placements per view and one body: proves image, assets, GPU, driver and the S3 round-trip
     # without paying for a real body. DS6_MAXPLACE truncates each view's placement list.
     submit ds6-smoke 1 '{"environment":[{"name":"DS6_MAXPLACE","value":"3"}]}' ;;
   pilot)
+    check_fresh
     # FULL 17x36 cross: 1330 placements/body, 31,920 scans, ~$83 at the measured 9 s/scan on
     # g5.xlarge. User approved the cost 2026-08-25. Exhaustive object x site coverage, so the
     # sample-mode question ("does 100/view give the same gate answers?") can be settled by
@@ -80,6 +106,7 @@ case "$WHAT" in
         {"name":"DS6_NPLACE","value":"100"},
         {"name":"DS6_S3_PREFIX","value":"dataset6_pilot_s"}]}' ;;
   full)
+    check_fresh
     register >/dev/null
     submit ds6-full "${N:-200}" ;;
   *) echo "usage: $0 register|smoke|pilot|full [N]" >&2; exit 2 ;;
