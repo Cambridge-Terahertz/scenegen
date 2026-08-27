@@ -251,6 +251,7 @@ if PLACEMENT_MODE == "sample" and NPLACE <= 0:
 # jitter stops exact memorisation of discrete positions, but it cannot on its own fix a site
 # distribution that differs between the classes.
 JITTER = _env("JITTER", "1") == "1"
+VIEW_SEED = _env("VIEW_SEED", "0") == "1"   # FIX 6: 1 = legacy per-view placement draw
 ROLL_JIT = float(_env("ROLL_JITTER_DEG", "20"))        # sigma, degrees, about the surface normal
 GAP_LO = float(_env("GAP_LO", "0.006"))                # clothing standoff, metres
 GAP_HI = float(_env("GAP_HI", "0.020"))
@@ -493,6 +494,7 @@ for bi, shp in enumerate(SHAPES):
                       standoff_m=STANDOFF, aper=APER_NAME, freq_window=FREQ_WINDOW,
                       window=APER_NAME,          # legacy alias: dataset5 readers expect `window`
                       jittered=JITTER, placement_mode=PLACEMENT_MODE, seed=SEED0,
+                      view_seeded=VIEW_SEED,   # FIX 6: False = the 4 views share one placement
                       gate_t=GATE_T, kgate=KGATE, **shp,
                       xs=XS.astype(np.float32), ys=YS.astype(np.float32),
                       zs=grid.zs.astype(np.float32), depth_map=dmap, gap_nominal_m=GAP,
@@ -515,7 +517,16 @@ for bi, shp in enumerate(SHAPES):
                 obj, is_threat = OBJECTS[obj_name]
                 # FIX 2 -- one rng per placement, seeded from the identity of the placement, so
                 # the draw is identical on any host and survives a resume mid-body.
-                prng = np.random.default_rng(_seed_of(SEED0, bid, stance, pidx, obj_name, site))
+                # FIX 6: the placement RNG must NOT depend on the view. With `stance` in the seed
+                # each view re-drew bary/roll/gap/flip, so the four views were four DIFFERENT SCENES
+                # rather than four aspects of one -- measured on a single (body, obj, site): roll
+                # -4.33 / -14.82 / +53.63 deg and gap 6.5 / 11.8 / 19.1 mm across three views. That
+                # blocks multi-view fusion and aspect-dependence studies, which is much of why four
+                # views exist. Dropping `stance` gives ONE physical placement seen four ways.
+                # DS6_VIEW_SEED=1 restores the per-view draw, to reproduce the 2026-08-25 pilot.
+                _key = ((SEED0, bid, stance, pidx, obj_name, site) if VIEW_SEED
+                        else (SEED0, bid, pidx, obj_name, site))
+                prng = np.random.default_rng(_seed_of(*_key))
                 pl = anatomy.sample_placement(model, site, prng, jitter=JITTER)
                 # Draw roll here rather than via attach()'s roll_jitter so the ACTUAL value is
                 # known and recorded -- attach() would apply it internally and not report it.
