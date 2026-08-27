@@ -4,14 +4,15 @@
     "kind": "benign",
     "material": "alloy",
     "s": 0.95,
-    "roll_deg": 180,
+    "roll_deg": 0,
     "dims_cm": [
       12.5,
       4.9,
       2.18
     ],
     "verts": 60270,
-    "source": "nonthreats/phone/nokia_3210_subdivided.obj"
+    "source": "nonthreats/phone/nokia_3210_subdivided.obj",
+    "flip": true
   },
   {
     "name": "phone_modern",
@@ -25,7 +26,8 @@
       0.82
     ],
     "verts": 26,
-    "source": "nonthreats/phone/iphone16_slab.stl"
+    "source": "nonthreats/phone/iphone16_slab.stl",
+    "flip": true
   },
   {
     "name": "wallet",
@@ -39,7 +41,8 @@
       1.11
     ],
     "verts": 7498,
-    "source": "nonthreats/wallet/uploads_files_3250715_Wallet_obj.obj"
+    "source": "nonthreats/wallet/uploads_files_3250715_Wallet_obj.obj",
+    "flip": false
   },
   {
     "name": "badge",
@@ -53,7 +56,8 @@
       1.41
     ],
     "verts": 5057,
-    "source": "nonthreats/badge/variants/name_badge_1.obj"
+    "source": "nonthreats/badge/variants/name_badge_1.obj",
+    "flip": false
   },
   {
     "name": "keys",
@@ -67,7 +71,8 @@
       3.93
     ],
     "verts": 1350,
-    "source": "nonthreats/key/variants/keys_bunch.obj"
+    "source": "nonthreats/key/variants/keys_bunch.obj",
+    "flip": false
   },
   {
     "name": "necklace",
@@ -81,7 +86,8 @@
       0.68
     ],
     "verts": 442274,
-    "source": "nonthreats/necklace/uploads_files_5780946_HighpolyPendat.stl"
+    "source": "nonthreats/necklace/uploads_files_5780946_HighpolyPendat.stl",
+    "flip": false
   },
   {
     "name": "belt",
@@ -95,7 +101,8 @@
       4.19
     ],
     "verts": 863,
-    "source": "nonthreats/belt/buckle/Buckle.obj"
+    "source": "nonthreats/belt/buckle/Buckle.obj",
+    "flip": false
   },
   {
     "name": "gun1_glock17",
@@ -109,63 +116,68 @@
       2.54
     ],
     "verts": 850121,
-    "source": "/Users/jonah/Documents/scratch_results/threat_dataset/glock17_ext.stl"
+    "source": "/Users/jonah/Documents/scratch_results/threat_dataset/glock17_ext.stl",
+    "flip": false
   },
   {
     "name": "gun2_glock19",
     "kind": "threat",
     "material": "steel",
     "s": 1.0,
-    "roll_deg": 0,
+    "roll_deg": 180,
     "dims_cm": [
       18.7,
       12.4,
       3.38
     ],
     "verts": 11155,
-    "source": "threats/gun/glock_cgtrader/obj/Glock 19.obj"
+    "source": "threats/gun/glock_cgtrader/obj/Glock 19.obj",
+    "flip": false
   },
   {
     "name": "gun3_hellcat",
     "kind": "threat",
     "material": "steel",
     "s": 1.0,
-    "roll_deg": 0,
+    "roll_deg": 180,
     "dims_cm": [
       16.0,
       10.7,
       2.26
     ],
     "verts": 34362,
-    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_FMK 9C1 - OBJ/FMK 9C1.obj"
+    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_FMK 9C1 - OBJ/FMK 9C1.obj",
+    "flip": false
   },
   {
     "name": "gun4_mp9",
     "kind": "threat",
     "material": "steel",
     "s": 1.0,
-    "roll_deg": 0,
+    "roll_deg": 180,
     "dims_cm": [
       19.0,
       11.9,
       3.04
     ],
     "verts": 38401,
-    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Grand Power K100 - OBJ/Grand Power K100.obj"
+    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Grand Power K100 - OBJ/Grand Power K100.obj",
+    "flip": false
   },
   {
     "name": "gun5_derringer",
     "kind": "threat",
     "material": "steel",
     "s": 1.0,
-    "roll_deg": 0,
+    "roll_deg": 180,
     "dims_cm": [
       12.0,
       7.7,
       1.89
     ],
     "verts": 43755,
-    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Tanfoglio GT27 - OBJ/Tanfoglio GT27.obj"
+    "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Tanfoglio GT27 - OBJ/Tanfoglio GT27.obj",
+    "flip": false
   },
   {
     "name": "knife_switchblade",
@@ -179,7 +191,8 @@
       1.45
     ],
     "verts": 1260,
-    "source": "threats/knife/pocketknife_a/selected/switchblade.obj"
+    "source": "threats/knife/pocketknife_a/selected/switchblade.obj",
+    "flip": false
   },
   {
     "name": "knife_folding",
@@ -193,7 +206,8 @@
       2.46
     ],
     "verts": 1686,
-    "source": "threats/knife/pocketknife_a/selected/folding_pocket_knife.obj"
+    "source": "threats/knife/pocketknife_a/selected/folding_pocket_knife.obj",
+    "flip": false
   },
   {
     "name": "knife_corkscrew",
@@ -207,21 +221,23 @@
       1.43
     ],
     "verts": 3504,
-    "source": "threats/knife/pocketknife_a/selected/corkscrew.obj"
+    "source": "threats/knife/pocketknife_a/selected/corkscrew.obj",
+    "flip": false
   },
   {
     "name": "knife_hunting",
     "kind": "threat",
     "material": "steel",
     "s": 1.0,
-    "roll_deg": 0,
+    "roll_deg": 180,
     "dims_cm": [
       27.0,
       7.0,
       2.67
     ],
     "verts": 2309,
-    "source": "threats/knife/pocketknife_a/selected/hunting_knife.obj"
+    "source": "threats/knife/pocketknife_a/selected/hunting_knife.obj",
+    "flip": false
   },
   {
     "name": "knife_dielectric",
@@ -235,6 +251,7 @@
       2.46
     ],
     "verts": 1686,
-    "source": "threats/knife/pocketknife_a/selected/folding_pocket_knife.obj"
+    "source": "threats/knife/pocketknife_a/selected/folding_pocket_knife.obj",
+    "flip": false
   }
 ]
