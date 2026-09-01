@@ -105,8 +105,8 @@ def _env(name, default=None):
             return v
     return default
 
-DS6_NAME = "dataset6_2026-08-25"
-OUT = _env("OUT", os.path.expanduser(f"~/{DS6_NAME}"))
+DS7_NAME = "dataset7_2026-09-01"
+OUT = _env("OUT", os.path.expanduser(f"~/{DS7_NAME}"))
 os.makedirs(OUT, exist_ok=True)
 TD = "/Users/jonah/Documents/scratch_results/threat_dataset" if os.path.isdir(
     "/Users/jonah/Documents/scratch_results/threat_dataset") else HERE
@@ -473,7 +473,7 @@ if MAXPLACE:
     _PLAN = {st: p[:MAXPLACE] for st, p in _PLAN.items()}
 N_PER_BODY = sum(len(p) for p in _PLAN.values())
 N_THREAT = sum(1 for p in _PLAN.values() for o, s in p if o != "none" and OBJECTS[o][1])
-print(f"[{datetime.datetime.now():%H:%M}] DATASET6 ({DS6_NAME}): {len(SHAPES)} bodies x "
+print(f"[{datetime.datetime.now():%H:%M}] DATASET7 ({DS7_NAME}): {len(SHAPES)} bodies x "
       f"{N_PER_BODY} placements = {len(SHAPES)*N_PER_BODY} scans "
       f"({len(SHAPES)*N_THREAT} threat / {len(SHAPES)*(N_PER_BODY-N_THREAT)} no-threat)", flush=True)
 print(f"  objects: " + ", ".join(f"{n}{'*' if t else ''}" for n, (_, t) in OBJECTS.items())
