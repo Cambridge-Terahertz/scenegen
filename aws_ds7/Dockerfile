@@ -20,7 +20,7 @@ RUN pip3 install --no-cache-dir torch --index-url https://download.pytorch.org/w
 # we run as root, so ~ = /root and dropping the code at those exact paths needs no symlinks.
 COPY threat_dataset/   /root/walkthrough/
 COPY model_gen_python/ /root/Documents/code/model_gen/python/
-COPY ds6/              /root/ds6/
+COPY ds7/              /root/ds7/
 COPY entrypoint.py     /opt/entrypoint.py
 
 # Assets (SMPL-X models, objects_v5 meshes, glock/phone STLs, shapes_10x10.json) are

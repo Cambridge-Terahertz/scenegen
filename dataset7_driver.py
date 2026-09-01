@@ -1,4 +1,16 @@
-"""Dataset 6 (ds6_m4v): matched-placement, jittered, 4-view regeneration of dataset5.
+"""Dataset 7 (ds7): dataset6 plus object-fidelity, stance and multipath fixes.
+
+WHAT CHANGED vs dataset6 -- all measured, see the commit log:
+  * GUN MATERIALS. Guns 2-5 were solid steel AND carried interior surface no sensor can see.
+    Stripping removes 57-65% of them; the polymer/steel split then costs a consistent
+    -8.5 to -9.1 dB. gun2 gets BRIGHTER when stripped -- interior was partly cancelling.
+  * OBJECT-SCALE Z-BUFFER. The joint body+object pass uses a 2 cm window tuned for a 30 cm
+    body, so a 3 cm object kept its own interior. Ray-cast truth: the old chain was +8.9 dB
+    wrong face-on and +2.3 dB at grazing even after stripping.
+  * L3 STANCE. Arms up, forearms vertical, palms to the array (screening_pose(arms="up")).
+  * MULTIPATH. Object<->body double bounce, saved separately so training can use either.
+
+Inherited from dataset 6 (ds6_m4v): matched-placement, jittered, 4-view regeneration of dataset5.
 
 Merges the two half-finished dataset5 successors and adds the two fixes neither had:
   * dataset5_4view_driver.py (2026-08-18) -> 4 views + conformal-envelope recon
@@ -13,8 +25,8 @@ WHAT CHANGED vs dataset5 -- four fixes, see ds6_scope.html:
      view can see, so P(site | threat) == P(site | benign) exactly and site carries zero label
      information by construction. The reviewer plausibility map is kept per-scan as `plausible`
      so analysis can still report the realistic subset.
-       DS6_PLACEMENT=cross   (default) full object x visible-site cross -- exactly matched
-       DS6_PLACEMENT=sample  draw DS6_NPLACE per (body,view): site ~ U(visible), obj ~ U(17)
+       DS7_PLACEMENT=cross   (default) full object x visible-site cross -- exactly matched
+       DS7_PLACEMENT=sample  draw DS7_NPLACE per (body,view): site ~ U(visible), obj ~ U(17)
 
   2. PLACEMENT JITTER    [stops within-site memorisation]
      dataset5 froze all four seating DOF: sample_placement(rng=default_rng(0), jitter=False)
@@ -35,12 +47,12 @@ WHAT CHANGED vs dataset5 -- four fixes, see ds6_scope.html:
      frequency (range) tapers are now INDEPENDENT knobs -- dataset5's driver coupled them, so
      asking for a rect aperture silently also dropped the range taper. The frequency taper
      stays taylor sll=40 (6.25 mm range res, already Pareto-optimal vs hann).
-       DS6_APER=rect|taylor|t25|hann   DS6_TAYLOR_SLL=40   DS6_FREQ_WINDOW=taylor|hann|none
+       DS7_APER=rect|taylor|t25|hann   DS7_TAYLOR_SLL=40   DS7_FREQ_WINDOW=taylor|hann|none
 
   4. FOUR VIEWS          [front / back / left / right]
      Body rotated about the vertical axis vs the fixed aperture. Each site is imaged only from
      the view(s) that actually see it (see placements()), so there are no unlearnable
-     fully-occluded far-side scans. DS6_ORIENTS=front,back,left,right
+     fully-occluded far-side scans. DS7_ORIENTS=front,back,left,right
 
 UNCHANGED from dataset5 (must stay comparable): 2.0 m standoff, +/-5 cm complex range gate,
 1 cm cross-range grid, 5 mm range step, body-blocked delta forward, han_db definition, the 3D
@@ -51,7 +63,7 @@ STILL NOT INCLUDED: roughness + noise floor (plan sec.7 step 2). SPECULAR datase
 
 All DS6_* knobs fall back to their DS5_* spelling, so existing launch scripts keep working.
 
-  DS6_OUT=/path DS6_NBODIES=8 DS6_ORIENTS=front,back,left,right DS6_APER=rect \
+  DS7_OUT=/path DS7_NBODIES=8 DS7_ORIENTS=front,back,left,right DS7_APER=rect \
     ~/miniconda3/envs/ra/bin/python dataset6_driver.py
 """
 import datetime, hashlib, json, os, sys, time
@@ -86,9 +98,12 @@ if not rf._HAS_CUPY:
     sys.exit("FATAL: no CuPy -- use ~/miniconda3/envs/ra/bin/python on a GPU host (bose/tesla).")
 
 def _env(name, default=None):
-    """DS6_<name>, falling back to the DS5_<name> spelling so old launch scripts keep working."""
-    v = os.environ.get(f"DS6_{name}")
-    return os.environ.get(f"DS5_{name}", default) if v is None else v
+    """DS7_<name>, falling back to DS6_ then DS5_ so old launch scripts keep working."""
+    for pref in ("DS7_", "DS6_", "DS5_"):
+        v = os.environ.get(f"{pref}{name}")
+        if v is not None:
+            return v
+    return default
 
 DS6_NAME = "dataset6_2026-08-25"
 OUT = _env("OUT", os.path.expanduser(f"~/{DS6_NAME}"))
@@ -141,7 +156,7 @@ KV = 2 * np.pi * FREQ / C0
 #     ds6 DEFAULTS TO RECT -- the closest match to real. Cost is rect's -13 dB sidelobes
 #     (the grid/cross artefacts), which the real untapered aperture also has.
 #
-#   FREQUENCY (DS6_FREQ_WINDOW) -> RANGE. Unchanged at taylor sll=40 (6.25 mm range res);
+#   FREQUENCY (DS7_FREQ_WINDOW) -> RANGE. Unchanged at taylor sll=40 (6.25 mm range res);
 #     recon._windows shows it is Pareto-optimal vs hann (narrower AND 8.6 dB quieter), so
 #     there is no reason to touch it. Must be a name backproject knows: taylor|hann|none.
 APER_NAME = _env("APER", _env("WINDOW", "rect"))
@@ -158,14 +173,14 @@ elif APER_NAME in ("rect", "none"):
 else:
     sys.exit(f"DS6_APER must be one of rect|taylor|t25|t30|hann, got {APER_NAME!r}")
 if FREQ_WINDOW not in ("taylor", "hann", "none"):
-    sys.exit(f"DS6_FREQ_WINDOW must be taylor|hann|none, got {FREQ_WINDOW!r}")
+    sys.exit(f"DS7_FREQ_WINDOW must be taylor|hann|none, got {FREQ_WINDOW!r}")
 # ARMS=up is the L3/AIT portal stance (upper arms level, forearms vertical, palms to the array)
 # and is what the full run uses. "down" reproduces datasets 3-6 exactly, for comparison runs.
 ARMS = _env("ARMS", "up")
 POSE = screening_pose(ARMS)
 S_SKIN = threats.MATERIALS["skin"][0]
 SHAPES = json.load(open(_env("SHAPES", f"{HERE}/shapes_10x10.json")))
-# DS6_BODY0 / DS6_NBODIES select a contiguous slab of bodies. One body per AWS Batch array task
+# DS7_BODY0 / DS6_NBODIES select a contiguous slab of bodies. One body per AWS Batch array task
 # is the shard unit: the driver reuses the posed mesh across all four views, so sharding any
 # finer would re-pay the ~96 s body prep per view.
 _B0N = int(_env("BODY0", "0"))
@@ -264,7 +279,7 @@ SEED0 = int(_env("SEED", "20260825"))
 if PLACEMENT_MODE not in ("cross", "sample"):
     sys.exit(f"DS6_PLACEMENT must be cross|sample, got {PLACEMENT_MODE!r}")
 if PLACEMENT_MODE == "sample" and NPLACE <= 0:
-    sys.exit("DS6_PLACEMENT=sample needs DS6_NPLACE > 0")
+    sys.exit("DS7_PLACEMENT=sample needs DS7_NPLACE > 0")
 
 # ---- FIX 2: placement jitter --------------------------------------------------------------
 # dataset5 pinned all four seating DOF, so a given site produced a byte-identical seat frame for
@@ -319,12 +334,12 @@ def fwd(q, s):
 def mask_of(idx, n):
     m = np.zeros(n, bool); m[np.asarray(idx).ravel()] = True; return m
 
-# ENVELOPE recon (DS6_ENVELOPE=1, default): reconstruct ONLY the +/-gate surface-band voxels
+# ENVELOPE recon (DS7_ENVELOPE=1, default): reconstruct ONLY the +/-gate surface-band voxels
 # via backproject_points (a verified-lossless subset of the dense cube) and scatter them into a
 # zero cube of grid.shape. Downstream code (han_db max-projection, gate(), object/clutter metrics)
 # is byte-for-byte unchanged -- the only difference from full-cube recon is that off-surface
 # voxels are exactly 0 instead of the ~noise-floor they carry in the dense recon. Cuts the recon
-# from ~10.8M voxels to ~1e5 (the band), the per-scan bottleneck. Set DS6_ENVELOPE=0 for the
+# from ~10.8M voxels to ~1e5 (the band), the per-scan bottleneck. Set DS7_ENVELOPE=0 for the
 # original dense recon (used to validate parity).
 ENVELOPE = _env("ENVELOPE", "1") == "1"
 # Object-scale self-occlusion pass. See the call site for why the body-scale one is not enough.
@@ -492,7 +507,7 @@ def _plan_of(bid):
 for bi, shp in enumerate(SHAPES):
     bid = bid_of(shp)
     plan = _plan_of(bid)
-    if all(os.path.exists(f"{OUT}/ds6_{bid}_{st}_{i:04d}_{o}_{s}.npz")
+    if all(os.path.exists(f"{OUT}/ds7_{bid}_{st}_{i:04d}_{o}_{s}.npz")
            for st in ORIENTS for i, o, s in plan[st]):
         print(f"  skip {bid} (done)", flush=True); nscan += N_PER_BODY; continue
 
@@ -539,7 +554,7 @@ for bi, shp in enumerate(SHAPES):
 
         for pidx, obj_name, site in plan[stance]:
             t1 = time.time()
-            f_out = f"{OUT}/ds6_{bid}_{stance}_{pidx:04d}_{obj_name}_{site}.npz"
+            f_out = f"{OUT}/ds7_{bid}_{stance}_{pidx:04d}_{obj_name}_{site}.npz"
             if os.path.exists(f_out):
                 nscan += 1; continue
 
@@ -597,7 +612,7 @@ for bi, shp in enumerate(SHAPES):
                     sig += fwd(gq[kt], gs[kt])
 
             # Envelope recon (+ reuse the body-only field for fully-occluded objects, whose
-            # signal is exactly sig_body). Falls back to the dense cube if DS6_ENVELOPE=0.
+            # signal is exactly sig_body). Falls back to the dense cube if DS7_ENVELOPE=0.
             if ENVELOPE:
                 if obj_name != "none" and ng == 0 and not shadow.any():
                     if field_base is None:
@@ -673,5 +688,5 @@ for bi, shp in enumerate(SHAPES):
         del bq, sb, sig_body
     del bq_raw, Vp, F, m, Vs, Fs
 
-print(f"[{datetime.datetime.now():%H:%M}] DATASET6 done: {nscan} scans in "
+print(f"[{datetime.datetime.now():%H:%M}] DATASET7 done: {nscan} scans in "
       f"{(time.time()-t_start)/60:.0f} min -> {OUT}", flush=True)

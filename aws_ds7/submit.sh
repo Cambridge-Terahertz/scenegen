@@ -6,7 +6,7 @@
 #   bash submit.sh smoke                 # 1 body, 3 placements/view, on-demand  (~$1, ~5 min)
 #   bash submit.sh pilot [N]             # N bodies (default 24), on-demand      (~$35)
 #   bash submit.sh full  [N]             # N bodies (default 200)                (~$299 OD)
-#   DS6_QUEUE=thz-queue bash submit.sh pilot     # ...on the SPOT queue instead
+#   DS7_QUEUE=thz-queue bash submit.sh pilot     # ...on the SPOT queue instead
 #
 # One array index == one body. The driver reuses the posed mesh across all four views, so a
 # finer shard would re-pay the ~96 s body prep per view.
@@ -14,11 +14,11 @@ set -euo pipefail
 
 ACCT=980885145101
 REGION=us-east-1
-REPO=thz-dataset6
+REPO=thz-dataset7
 BUCKET=thz-walkthrough-${ACCT}
 IMAGE=${ACCT}.dkr.ecr.${REGION}.amazonaws.com/${REPO}:latest
-JOBDEF=thz-dataset6
-QUEUE=${DS6_QUEUE:-thz-queue-od}          # on-demand by default: g5 spot is only ~35% off today
+JOBDEF=thz-dataset7
+QUEUE=${DS7_QUEUE:-thz-queue-od}          # on-demand by default: g5 spot is only ~35% off today
 AWS=${AWS:-aws}
 WHAT=${1:-register}
 N=${2:-}
@@ -32,15 +32,15 @@ register() {
   "vcpus": 4, "memory": 14000,
   "resourceRequirements": [{"type": "GPU", "value": "1"}],
   "environment": [
-    {"name": "DS6_S3_BUCKET", "value": "$BUCKET"},
-    {"name": "DS6_S3_PREFIX", "value": "dataset6"},
-    {"name": "DS6_S3_ASSETS", "value": "s3://$BUCKET/assets/ds6_assets.tgz"},
-    {"name": "DS6_ORIENTS",   "value": "front,back,left,right"},
-    {"name": "DS6_APER",      "value": "rect"},
-    {"name": "DS6_FREQ_WINDOW","value": "taylor"},
-    {"name": "DS6_PLACEMENT", "value": "cross"},
-    {"name": "DS6_JITTER",    "value": "1"},
-    {"name": "DS6_SEED",      "value": "20260825"}
+    {"name": "DS7_S3_BUCKET", "value": "$BUCKET"},
+    {"name": "DS7_S3_PREFIX", "value": "dataset6"},
+    {"name": "DS7_S3_ASSETS", "value": "s3://$BUCKET/assets/ds6_assets.tgz"},
+    {"name": "DS7_ORIENTS",   "value": "front,back,left,right"},
+    {"name": "DS7_APER",      "value": "rect"},
+    {"name": "DS7_FREQ_WINDOW","value": "taylor"},
+    {"name": "DS7_PLACEMENT", "value": "cross"},
+    {"name": "DS7_JITTER",    "value": "1"},
+    {"name": "DS7_SEED",      "value": "20260825"}
   ]
 }
 JSON
@@ -62,7 +62,7 @@ submit() {                                  # submit <name> <n_bodies> [extra-en
 # which is exactly how a frame migration would silently produce 266,000 wrong-frame scans. Compare
 # the pushed image against the driver's mtime and refuse rather than warn.
 check_fresh() {
-  local drv="$(cd "$(dirname "$0")" && pwd)/../dataset6_driver.py"
+  local drv="$(cd "$(dirname "$0")" && pwd)/../dataset7_driver.py"
   [ -f "$drv" ] || return 0
   local pushed drv_epoch img_epoch
   pushed=$("$AWS" ecr describe-images --repository-name "$REPO" --region "$REGION" \
@@ -72,10 +72,10 @@ check_fresh() {
               || date -d "${pushed%%.*}" +%s 2>/dev/null) || return 0
   drv_epoch=$(stat -f %m "$drv" 2>/dev/null || stat -c %Y "$drv")
   if [ "$drv_epoch" -gt "$img_epoch" ]; then
-    echo "REFUSING: dataset6_driver.py is newer than the pushed ECR image." >&2
+    echo "REFUSING: dataset7_driver.py is newer than the pushed ECR image." >&2
     echo "  driver $(date -r "$drv_epoch" 2>/dev/null || date -d @"$drv_epoch")" >&2
     echo "  image  $pushed" >&2
-    echo "  Rebuild first:  ssh tesla 'cd ~/scenegen/aws_ds6 && bash build.sh'" >&2
+    echo "  Rebuild first:  ssh tesla 'cd ~/scenegen/aws_ds7 && bash build.sh'" >&2
     echo "  Override with FORCE_STALE=1 only if you know the difference does not matter." >&2
     [ "${FORCE_STALE:-0}" = 1 ] || exit 2
   fi
@@ -87,8 +87,8 @@ case "$WHAT" in
     check_fresh
     register >/dev/null
     # 3 placements per view and one body: proves image, assets, GPU, driver and the S3 round-trip
-    # without paying for a real body. DS6_MAXPLACE truncates each view's placement list.
-    submit ds6-smoke 1 '{"environment":[{"name":"DS6_MAXPLACE","value":"3"}]}' ;;
+    # without paying for a real body. DS7_MAXPLACE truncates each view's placement list.
+    submit ds6-smoke 1 '{"environment":[{"name":"DS7_MAXPLACE","value":"3"}]}' ;;
   pilot)
     check_fresh
     # FULL 17x36 cross: 1330 placements/body, 31,920 scans, ~$83 at the measured 9 s/scan on
@@ -97,14 +97,14 @@ case "$WHAT" in
     # subsampling this set offline instead of paying for a second run.
     register >/dev/null
     submit ds6-pilot "${N:-24}" '{"environment":[
-        {"name":"DS6_PLACEMENT","value":"cross"},
-        {"name":"DS6_S3_PREFIX","value":"dataset6_pilot"}]}' ;;
+        {"name":"DS7_PLACEMENT","value":"cross"},
+        {"name":"DS7_S3_PREFIX","value":"dataset6_pilot"}]}' ;;
   pilot-sample)
     register >/dev/null
     submit ds6-pilot-s "${N:-24}" '{"environment":[
-        {"name":"DS6_PLACEMENT","value":"sample"},
-        {"name":"DS6_NPLACE","value":"100"},
-        {"name":"DS6_S3_PREFIX","value":"dataset6_pilot_s"}]}' ;;
+        {"name":"DS7_PLACEMENT","value":"sample"},
+        {"name":"DS7_NPLACE","value":"100"},
+        {"name":"DS7_S3_PREFIX","value":"dataset6_pilot_s"}]}' ;;
   full)
     check_fresh
     register >/dev/null

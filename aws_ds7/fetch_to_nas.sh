@@ -7,14 +7,14 @@
 #
 #   bash fetch_to_nas.sh                  # sync, verify, and PROMPT before deleting from S3
 #   bash fetch_to_nas.sh --purge          # sync, verify, delete without prompting
-#   DS6_PREFIX=dataset6_pilot bash fetch_to_nas.sh
+#   DS7_PREFIX=dataset6_pilot bash fetch_to_nas.sh
 set -euo pipefail
 
 ACCT=980885145101
 REGION=us-east-1
 BUCKET=thz-walkthrough-${ACCT}
-PREFIX=${DS6_PREFIX:-dataset6}
-DEST=${DS6_NAS:-/mnt/shared_drive/Jonah/synthetic_data/dataset6_2026-08-25}
+PREFIX=${DS7_PREFIX:-dataset6}
+DEST=${DS7_NAS:-/mnt/shared_drive/Jonah/synthetic_data/dataset6_2026-08-25}
 AWS=$(command -v aws || echo "${HOME}/miniconda3/envs/ra/bin/aws")
 PURGE=${1:-}
 

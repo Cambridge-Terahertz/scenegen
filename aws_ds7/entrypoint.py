@@ -4,27 +4,27 @@ Batch sets AWS_BATCH_JOB_ARRAY_INDEX. One array index == one body, because the d
 posed SMPL-X mesh across all four views -- sharding per (body, view) instead would re-pay the
 ~96 s body prep four times. A body is 1,330 scans in `cross` mode, ~90 min on a g5.xlarge.
 
-    body_index = DS6_BODY_OFFSET + AWS_BATCH_JOB_ARRAY_INDEX
+    body_index = DS7_BODY_OFFSET + AWS_BATCH_JOB_ARRAY_INDEX
 
 Assets (SMPL-X, objects_v5, STLs) are license-restricted and NOT baked into the image; they come
 from a private S3 tarball at runtime, extracted to /root, which is where the driver's ~-relative
 defaults look. Extraction is skipped when the container is warm.
 
 Env from the job definition:
-    DS6_S3_BUCKET   (required)  destination bucket
-    DS6_S3_PREFIX   default "dataset6"
-    DS6_S3_ASSETS   (required)  s3:// uri of the asset tarball
-    DS6_BODY_OFFSET default 0   added to the array index
-    any other DS6_* knob (APER, ORIENTS, PLACEMENT, NPLACE, SEED, JITTER, ...) is passed straight
+    DS7_S3_BUCKET   (required)  destination bucket
+    DS7_S3_PREFIX   default "dataset6"
+    DS7_S3_ASSETS   (required)  s3:// uri of the asset tarball
+    DS7_BODY_OFFSET default 0   added to the array index
+    any other DS7_* knob (APER, ORIENTS, PLACEMENT, NPLACE, SEED, JITTER, ...) is passed straight
     through to the driver, so a pilot and the full run differ only by job-definition overrides.
 """
 import os, subprocess, sys, glob
 
-idx = int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", os.environ.get("DS6_INDEX", "0")))
-body = int(os.environ.get("DS6_BODY_OFFSET", "0")) + idx
-bucket = os.environ["DS6_S3_BUCKET"]
-prefix = os.environ.get("DS6_S3_PREFIX", "dataset6")
-assets = os.environ["DS6_S3_ASSETS"]
+idx = int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", os.environ.get("DS7_INDEX", "0")))
+body = int(os.environ.get("DS7_BODY_OFFSET", "0")) + idx
+bucket = os.environ["DS7_S3_BUCKET"]
+prefix = os.environ.get("DS7_S3_PREFIX", "dataset6")
+assets = os.environ["DS7_S3_ASSETS"]
 
 # 1. license-restricted assets -> /root (idempotent; a warm container skips it)
 if not os.path.exists("/root/smplx_models"):
@@ -34,9 +34,9 @@ if not os.path.exists("/root/smplx_models"):
 # 2. run exactly this one body, all views
 out = f"/tmp/ds6_{body:03d}"
 os.makedirs(out, exist_ok=True)
-env = dict(os.environ, DS6_OUT=out, DS6_BODY0=str(body), DS6_NBODIES="1")
+env = dict(os.environ, DS7_OUT=out, DS7_BODY0=str(body), DS7_NBODIES="1")
 print(f"[batch idx {idx}] body={body} -> {out}", flush=True)
-subprocess.check_call(["python3", "/root/ds6/dataset6_driver.py"], env=env)
+subprocess.check_call(["python3", "/root/ds7/dataset7_driver.py"], env=env)
 
 # 3. upload this body's scans. Fail loudly on an empty result rather than reporting success --
 # a task that silently uploads nothing looks identical to a task that had no work to do.

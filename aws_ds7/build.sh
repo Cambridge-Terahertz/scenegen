@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Assemble the build context on tesla, build the ds6 image with podman, push to ECR, and stage
+# Assemble the build context on tesla, build the ds7 image with podman, push to ECR, and stage
 # the license-restricted assets to S3. Run ON tesla. Idempotent -- safe to re-run.
 #
 #   bash build.sh            # build + push image, and build/upload the asset tarball
@@ -13,10 +13,10 @@ AWS=$(command -v aws || echo "${HOME}/miniconda3/envs/ra/bin/aws")
 
 ACCT=980885145101
 REGION=us-east-1
-REPO=thz-dataset6
+REPO=thz-dataset7
 BUCKET=thz-walkthrough-${ACCT}
 ECR=${ACCT}.dkr.ecr.${REGION}.amazonaws.com
-CTX=${HOME}/ds6_build
+CTX=${HOME}/ds7_build
 SRC_DIRS=("$HOME/scenegen" "$HOME/probe" "$HOME/walkthrough" "$HOME/threat_dataset")
 # scenegen FIRST: the image should be built from the repo, not from whichever scattered
 # working copy happens to be newest. The other dirs remain as fallbacks for assets the
@@ -48,7 +48,7 @@ cp "$HEREDIR"/{Dockerfile,entrypoint.py} "$CTX"/
 # frame.py MUST sit next to the driver: the driver does
 #   sys.path.insert(0, dirname(abspath(__file__))); import frame
 # so without this the container fails with ImportError before the first scan.
-cp "$HEREDIR"/../dataset6_driver.py "$HEREDIR"/../frame.py "$CTX"/ds6/
+cp "$HEREDIR"/../dataset7_driver.py "$HEREDIR"/../frame.py "$CTX"/ds7/
 
 # Python modules the driver imports. placement_config resolves confuser_site_map.json relative to
 # ITSELF (its other candidate is a stale job tmp dir), so the map must land in the same directory.
@@ -58,7 +58,7 @@ for f in anatomy.py attach.py threats.py body.py mesh_sample.py placement_config
 done
 # shapes_10x10.json must sit next to the DRIVER (its default is "{HERE}/shapes_10x10.json"),
 # which is a different container directory from the modules.
-cp "$(pick shapes_10x10.json)" "$CTX/ds6/"
+cp "$(pick shapes_10x10.json)" "$CTX/ds7/"
 cp "$MG"/*.py "$CTX/model_gen_python/"
 
 # ---------------------------------------------------------------- image ----
