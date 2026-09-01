@@ -327,6 +327,16 @@ def mask_of(idx, n):
 # from ~10.8M voxels to ~1e5 (the band), the per-scan bottleneck. Set DS6_ENVELOPE=0 for the
 # original dense recon (used to validate parity).
 ENVELOPE = _env("ENVELOPE", "1") == "1"
+# Object-scale self-occlusion pass. See the call site for why the body-scale one is not enough.
+OBJ_ZBUF = _env("OBJ_ZBUF", "1") == "1"
+OBJ_ZPIX = float(_env("OBJ_ZPIX", "0.001"))      # 1 mm: the object is ~10 cm, not ~1 m
+OBJ_ZDEPTH = float(_env("OBJ_ZDEPTH", "0.004"))  # keep 4 mm behind the front surface.
+# 4 mm, not 2 mm: a z-buffer at (keep_depth, pixel) implicitly rejects surface sloped beyond
+# atan(keep_depth/pixel) -- 63 deg at 2 mm/1 mm. At grazing (the left/right views) ~77% of genuinely
+# visible surface sits ABOVE 75 deg obliquity, so 2 mm removed 52-74% of real signal on badge, keys,
+# knives and gun2, with spurious truncation glints. 4 mm raises the cutoff to 76 deg while still
+# culling knife interiors, which sit >=4 mm back. Worst-case peak error vs ray-cast ground truth:
+# old chain +8.9 dB, 2 mm -0.8, 4 mm +0.5, 8 mm +5.4.
 _APER_W = np.outer(APER, APER).ravel().astype(np.float32)
 
 def _to_np(a):
@@ -516,6 +526,8 @@ for bi, shp in enumerate(SHAPES):
                       window=APER_NAME,          # legacy alias: dataset5 readers expect `window`
                       jittered=JITTER, placement_mode=PLACEMENT_MODE, seed=SEED0,
                       arms=ARMS,               # "up" = L3 portal stance; "down" = datasets 3-6
+                      obj_zbuf=OBJ_ZBUF,       # object-scale self-occlusion cull
+                      obj_zdepth=OBJ_ZDEPTH,
                       view_seeded=VIEW_SEED,   # FIX 6: False = the 4 views share one placement
                       gate_t=GATE_T, kgate=KGATE, **shp,
                       xs=XS.astype(np.float32), ys=YS.astype(np.float32),
@@ -565,6 +577,17 @@ for bi, shp in enumerate(SHAPES):
                 q_all = np.vstack([bq, gq])
                 keep = mask_of(zbuffer_cull(q_all, pixel=0.003, depth_axis=2, keep_depth=0.02), len(q_all))
                 kb, kt = keep[:len(bq)], keep[len(bq):]
+                # The joint pass above uses keep_depth=2 cm, a depth tuned for a ~30 cm-deep BODY.
+                # A pistol is 3 cm thick, so that window spans the whole object and keeps its
+                # interior -- bore, magwell, frame walls -- which then radiate. Measured on the
+                # knives, whose meshes are 27-34% interior, that is ~11 dB of pure fiction. So run a
+                # second pass at OBJECT scale over the object's own points, dropping surface hidden
+                # behind the object itself. Body handling is untouched.
+                if OBJ_ZBUF and kt.any():
+                    _i = np.flatnonzero(kt)
+                    _k2 = mask_of(zbuffer_cull(np.ascontiguousarray(gq[_i]), pixel=OBJ_ZPIX,
+                                               depth_axis=2, keep_depth=OBJ_ZDEPTH), len(_i))
+                    kt = np.zeros_like(kt); kt[_i[_k2]] = True
                 ng = int(kt.sum())
                 shadow = keep_b0 & ~kb
                 sig = sig_body.copy()
