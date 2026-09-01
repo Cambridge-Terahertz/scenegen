@@ -95,10 +95,13 @@ OUT = _env("OUT", os.path.expanduser(f"~/{DS6_NAME}"))
 os.makedirs(OUT, exist_ok=True)
 TD = "/Users/jonah/Documents/scratch_results/threat_dataset" if os.path.isdir(
     "/Users/jonah/Documents/scratch_results/threat_dataset") else HERE
+# Require the MESHES, not just the directory: the repo tracks objects_v5/manifest.json but
+# gitignores the .obj files, so a checkout leaves an objects_v5 dir that exists and is empty of
+# meshes. Selecting it by isdir alone picks that one and dies later on trimesh.load.
 V5 = next(p for p in (f"{HERE}/objects_v5", f"{TD}/objects_v5",
                       os.path.expanduser("~/probe/objects_v5"),
                       os.path.expanduser("~/walkthrough/objects_v5"),  # container layout
-                      ) if os.path.isdir(p))
+                      ) if os.path.isdir(p) and any(f.endswith(".obj") for f in os.listdir(p)))
 GLOCK_STL = next(p for p in (f"{HERE}/glock17_ext.stl", f"{TD}/glock17_ext.stl",
                              os.path.expanduser("~/walkthrough/glock17_ext.stl"),
                              os.path.expanduser("~/threat_dataset/glock17_ext.stl"))
@@ -156,7 +159,10 @@ else:
     sys.exit(f"DS6_APER must be one of rect|taylor|t25|t30|hann, got {APER_NAME!r}")
 if FREQ_WINDOW not in ("taylor", "hann", "none"):
     sys.exit(f"DS6_FREQ_WINDOW must be taylor|hann|none, got {FREQ_WINDOW!r}")
-POSE = screening_pose()
+# ARMS=up is the L3/AIT portal stance (upper arms level, forearms vertical, palms to the array)
+# and is what the full run uses. "down" reproduces datasets 3-6 exactly, for comparison runs.
+ARMS = _env("ARMS", "up")
+POSE = screening_pose(ARMS)
 S_SKIN = threats.MATERIALS["skin"][0]
 SHAPES = json.load(open(_env("SHAPES", f"{HERE}/shapes_10x10.json")))
 # DS6_BODY0 / DS6_NBODIES select a contiguous slab of bodies. One body per AWS Batch array task
@@ -170,14 +176,29 @@ if not SHAPES:
 
 # ---------------------------------------------------------------- object catalogue ----------
 # gun1 = the dataset4 two-material Glock (build_library does the steel/polymer split). Everything
-# else = an objects_v5 mesh (already canonical + real-scale) wrapped as a single-material Threat.
+# else = an objects_v5 mesh (already canonical + real-scale). An object that ships `_steel.obj` /
+# `_polymer.obj` parts is built as a multi-material Threat; anything else stays single-material.
+#
+# Guns 2-5 gained parts because they are polymer-framed pistols (Glock 19, FMK 9C1, Grand Power
+# K100) that were modelled as solid steel -- too bright, and missing the bright-slide-over-dim-frame
+# structure a detector should key on. The Tanfoglio GT27 ships steel-only: it is cast zinc alloy
+# throughout. Those part meshes are also INTERIOR-STRIPPED -- 57-65% of each raw mesh was bore,
+# magwell and frame internals that no sensor can see, worth several dB of pure fiction.
 OBJECTS = {"gun1_glock17": (threats.build_library(glock_stl=GLOCK_STL, phone_stl=PHONE)["pistol"], True)}
 for name, o in pc.OBJECTS.items():
     if name == "gun1_glock17":
         continue
-    mesh = trimesh.load(f"{V5}/{name}.obj", process=False)
-    OBJECTS[name] = (threats.Threat(name, o["kind"], o["material"], mesh=mesh, conformal=False),
-                     o["kind"] == "threat")
+    _steel = f"{V5}/{name}_steel.obj"
+    if os.path.exists(_steel):
+        parts = [(trimesh.load(_steel, process=False), "steel")]
+        _poly = f"{V5}/{name}_polymer.obj"
+        if os.path.exists(_poly):
+            parts.append((trimesh.load(_poly, process=False), "polymer"))
+        thr = threats.Threat(name, o["kind"], o["material"], parts=parts, conformal=False)
+    else:
+        mesh = trimesh.load(f"{V5}/{name}.obj", process=False)
+        thr = threats.Threat(name, o["kind"], o["material"], mesh=mesh, conformal=False)
+    OBJECTS[name] = (thr, o["kind"] == "threat")
 ROLL_OF = {name: float(o["roll_deg"]) for name, o in pc.OBJECTS.items()}
 ROLL_OF["gun1_glock17"] = 0.0
 
@@ -494,6 +515,7 @@ for bi, shp in enumerate(SHAPES):
                       standoff_m=STANDOFF, aper=APER_NAME, freq_window=FREQ_WINDOW,
                       window=APER_NAME,          # legacy alias: dataset5 readers expect `window`
                       jittered=JITTER, placement_mode=PLACEMENT_MODE, seed=SEED0,
+                      arms=ARMS,               # "up" = L3 portal stance; "down" = datasets 3-6
                       view_seeded=VIEW_SEED,   # FIX 6: False = the 4 views share one placement
                       gate_t=GATE_T, kgate=KGATE, **shp,
                       xs=XS.astype(np.float32), ys=YS.astype(np.float32),

@@ -31,6 +31,16 @@ pick() {
   echo "FATAL: cannot find $1 in ${SRC_DIRS[*]}" >&2; return 1
 }
 
+# objects_v5 needs more than existence. The repo tracks only its manifest.json -- the .obj meshes
+# are gitignored -- so ~/scenegen/objects_v5 EXISTS but is empty of meshes, and plain `pick` would
+# happily return it and ship an image that dies on the first trimesh.load. Require the payload.
+pick_meshes() {
+  for d in "${SRC_DIRS[@]}"; do
+    if [ -n "$(ls "$d/$1"/*.obj 2>/dev/null)" ]; then echo "$d/$1"; return 0; fi
+  done
+  echo "FATAL: no $1 containing .obj meshes in ${SRC_DIRS[*]}" >&2; return 1
+}
+
 # ---------------------------------------------------------------- build context ----
 HEREDIR=$(cd "$(dirname "$0")" && pwd)
 rm -rf "$CTX"; mkdir -p "$CTX"/{threat_dataset,model_gen_python,ds6}
@@ -73,7 +83,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = assets ]; then
   #                               AND the driver (now searches ~/walkthrough/objects_v5)
   #   walkthrough/*.stl        -> driver's GLOCK_STL / PHONE search
   STAGE=$(mktemp -d); mkdir -p "$STAGE/walkthrough"
-  cp -r "$(pick objects_v5)" "$STAGE/walkthrough/"
+  cp -r "$(pick_meshes objects_v5)" "$STAGE/walkthrough/"
   cp "$(pick glock17_ext.stl)" "$(pick phone_hull.stl)" "$STAGE/walkthrough/"
   TGZ=/tmp/ds6_assets.tgz
   tar czf "$TGZ" -C "$HOME" smplx_models -C "$STAGE" walkthrough

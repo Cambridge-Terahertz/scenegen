@@ -132,7 +132,16 @@
     ],
     "verts": 11155,
     "source": "threats/gun/glock_cgtrader/obj/Glock 19.obj",
-    "flip": false
+    "flip": false,
+    "parts": [
+      "steel",
+      "polymer"
+    ],
+    "exterior_stripped": true,
+    "exterior_area_cm2": 338.3,
+    "steel_frac_area": 0.325,
+    "real_weapon": "Glock 19",
+    "materials_note": "polymer frame, steel slide"
   },
   {
     "name": "gun3_hellcat",
@@ -147,7 +156,16 @@
     ],
     "verts": 34362,
     "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_FMK 9C1 - OBJ/FMK 9C1.obj",
-    "flip": false
+    "flip": false,
+    "parts": [
+      "steel",
+      "polymer"
+    ],
+    "exterior_stripped": true,
+    "exterior_area_cm2": 227.6,
+    "steel_frac_area": 0.366,
+    "real_weapon": "FMK 9C1",
+    "materials_note": "polymer frame, steel slide"
   },
   {
     "name": "gun4_mp9",
@@ -162,7 +180,16 @@
     ],
     "verts": 38401,
     "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Grand Power K100 - OBJ/Grand Power K100.obj",
-    "flip": false
+    "flip": false,
+    "parts": [
+      "steel",
+      "polymer"
+    ],
+    "exterior_stripped": true,
+    "exterior_area_cm2": 319.9,
+    "steel_frac_area": 0.319,
+    "real_weapon": "Grand Power K100",
+    "materials_note": "polymer frame, steel slide"
   },
   {
     "name": "gun5_derringer",
@@ -177,7 +204,15 @@
     ],
     "verts": 43755,
     "source": "threats/gun/firearms_100_highpoly/100 Firearms High-Poly V1 - OBJ/Pistol_Tanfoglio GT27 - OBJ/Tanfoglio GT27.obj",
-    "flip": false
+    "flip": false,
+    "parts": [
+      "steel"
+    ],
+    "exterior_stripped": true,
+    "exterior_area_cm2": 168.0,
+    "steel_frac_area": 1.0,
+    "real_weapon": "Tanfoglio GT27",
+    "materials_note": "cast zinc alloy throughout: NOT split"
   },
   {
     "name": "knife_switchblade",

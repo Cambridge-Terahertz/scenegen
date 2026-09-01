@@ -23,7 +23,17 @@ from anatomy import NAME2J
 
 ARM_DOWN_DEG = 40.0    # from horizontal. 40 deg down = arms ~50 deg off the torso: clear of
                        # the flanks, but not a comedic T-pose.
+ARM_UP_DEG = 10.0      # L3/AIT portal "goalpost": upper arms held out nearly LEVEL with the
+                       # ground, just clear of the shoulders ...
+ELBOW_UP_DEG = 80.0    # ... and the elbows carry the rest, so the forearms still finish vertical
+                       # (10 + 80 = 90). Shoulder and elbow turn about the same axis, so the two
+                       # angles simply add -- keep their sum at 90.
+WRIST_ROLL_DEG = 90.0  # ... and the forearms twisted so the PALMS FACE THE ARRAY. Without this
+                       # the hands keep their T-pose palm-down orientation, which after the arm is
+                       # raised leaves them edge-on: a hand seen edge-on presents almost no
+                       # specular return, and is not the flat-palms-forward stance a portal asks for.
 HIP_OUT_DEG = 7.0      # shoulder-width feet
+HIP_OUT_L3_DEG = 12.0  # the portal's floor markings set the feet wider than a natural stance
 
 
 def _idx(joint_name):
@@ -31,13 +41,48 @@ def _idx(joint_name):
     return NAME2J[joint_name] - 1
 
 
-def screening_pose():
-    """-> body_pose (63,) float64. Arms lowered from the T-pose, feet shoulder-width."""
+def screening_pose(arms="down"):
+    """-> body_pose (63,) float64. Feet apart; arm position selected by `arms`.
+
+    "down" -- arms lowered from the T-pose. Datasets 3-6 were generated with this.
+    "up"   -- the L3/AIT portal pose: upper arms raised above horizontal, elbows bent so the
+              forearms finish vertical and the hands ride above the head. This is the stance a
+              passenger actually holds in a millimetre-wave portal.
+
+              It is a REALISM change, not a visibility one. Measured front-view occlusion over
+              torso bands anchored in metres above the feet (anchoring by fraction of height is
+              wrong here -- raising the arms grows the bbox 1.71 -> 1.98 m, so a fixed fraction
+              lands on different anatomy): every band moves by <=3.3%, and whole-body visibility
+              goes 85.7% -> 86.1%. At ARM_DOWN_DEG=40 the arms already hang clear of the torso,
+              so there was little shadowing left to remove.
+
+    The default stays "down" so the already-generated datasets reproduce bit-for-bit; a new run
+    asks for "up" explicitly.
+    """
     p = np.zeros((21, 3), np.float64)
-    a = np.deg2rad(ARM_DOWN_DEG)
-    p[_idx("left_shoulder")] = [0.0, 0.0, -a]      # left arm rests along +x -> -z lowers it
-    p[_idx("right_shoulder")] = [0.0, 0.0, +a]     # right arm rests along -x -> +z lowers it
-    h = np.deg2rad(HIP_OUT_DEG)
+    if arms == "down":
+        a = np.deg2rad(ARM_DOWN_DEG)
+        p[_idx("left_shoulder")] = [0.0, 0.0, -a]  # left arm rests along +x -> -z lowers it
+        p[_idx("right_shoulder")] = [0.0, 0.0, +a] # right arm rests along -x -> +z lowers it
+        h = np.deg2rad(HIP_OUT_DEG)
+    elif arms == "up":
+        a = np.deg2rad(ARM_UP_DEG)
+        p[_idx("left_shoulder")] = [0.0, 0.0, +a]  # mirror of "down": +z RAISES the left arm
+        p[_idx("right_shoulder")] = [0.0, 0.0, -a]
+        # the elbow turns about the same +z, so the forearm keeps bending in the same (coronal)
+        # plane the shoulder swung in -- shoulder + elbow = 90 deg leaves the forearms vertical.
+        e = np.deg2rad(ELBOW_UP_DEG)
+        p[_idx("left_elbow")] = [0.0, 0.0, +e]
+        p[_idx("right_elbow")] = [0.0, 0.0, -e]
+        # Pronation/supination: a twist about each forearm's OWN long axis, which in the rest pose
+        # is +x for the left arm and -x for the right -- hence the opposite signs. Verified by
+        # measuring the palm normal (PCA thin axis of the hand vertices), not by trusting the sign.
+        r = np.deg2rad(WRIST_ROLL_DEG)
+        p[_idx("left_wrist")] = [-r, 0.0, 0.0]
+        p[_idx("right_wrist")] = [+r, 0.0, 0.0]
+        h = np.deg2rad(HIP_OUT_L3_DEG)
+    else:
+        raise ValueError(f"arms must be 'down' or 'up', got {arms!r}")
     p[_idx("left_hip")] = [0.0, 0.0, +h]           # legs hang along -y, so the sign flips
     p[_idx("right_hip")] = [0.0, 0.0, -h]
     return p.ravel()
