@@ -331,6 +331,46 @@ def fwd(q, s):
                                 tx=TX, rx=RX, k=KV), precision="fp32")
     return sig
 
+def fwd_at(q, s, tx, rx):
+    """fwd() with explicit transmitter/receiver positions -- the multipath passes need mirrored ones."""
+    sig = np.zeros((NFREQ, len(rx)), np.complex64)
+    for c0 in range(0, len(q), 2_000_000):
+        sig += rf.forward(Scene(q=q[c0:c0 + 2_000_000], s=s[c0:c0 + 2_000_000],
+                                tx=tx, rx=rx, k=KV), precision="fp32")
+    return sig
+
+
+def multipath_sig(gpts, gs_, Vp_, pl_, roll_, stance_, yc_):
+    """Object<->body double bounce: Tx -> object -> body -> Rx, and its reverse.
+
+    Treat the body under the object as a local mirror plane -- the SAME plane the object was
+    seated against, so it cannot disagree with the attachment. For a plane, the specular path
+    collapses to an IMAGE SOURCE: |P-B| + |B-Rx| == |P-Rx'| exactly, where Rx' is Rx reflected.
+    (Verified to 1.8e-15 m over 4000 random geometries, and against a physical-optics integral
+    over the plane, whose phase is stable as the patch grows -- the stationary point dominates.)
+    So the bounce needs no kernel change at all: it is rf.forward with a mirrored Rx (object
+    first) or a mirrored Tx (body first). Both paths exist and are physically distinct because
+    Tx and Rx sit in different places.
+
+    One factor of the skin reflectivity per bounce. Points BEHIND the local plane admit no
+    specular bounce and are dropped -- none occur for a rigidly seated object, but a conformal
+    one wrapping around curvature could produce them.
+
+    Tier-1 by intent: one plane per placement rather than per point, no occlusion along the
+    bounce legs, no polarisation, no curvature focusing.
+    """
+    p0, R = attach.seat_frame(Vp_, VC, F, pl_["face"], np.asarray(pl_["bary"]), roll_)
+    p0 = to_world(p0[None, :], stance_, yc_)[0]
+    nrm = to_world(R[:, 2][None, :], stance_, yc_, is_dir=True)[0]
+    nrm = nrm / np.linalg.norm(nrm)
+    front = ((gpts - p0) @ nrm) > 0
+    if not front.any():
+        return None
+    q_, s_ = gpts[front], gs_[front] * S_SKIN
+    mir = lambda X: X - 2.0 * ((X - p0) @ nrm)[:, None] * nrm[None, :]
+    return fwd_at(q_, s_, TX, mir(RX)) + fwd_at(q_, s_, mir(TX), RX)
+
+
 def mask_of(idx, n):
     m = np.zeros(n, bool); m[np.asarray(idx).ravel()] = True; return m
 
@@ -345,6 +385,7 @@ ENVELOPE = _env("ENVELOPE", "1") == "1"
 # Object-scale self-occlusion pass. See the call site for why the body-scale one is not enough.
 OBJ_ZBUF = _env("OBJ_ZBUF", "1") == "1"
 OBJ_ZPIX = float(_env("OBJ_ZPIX", "0.001"))      # 1 mm: the object is ~10 cm, not ~1 m
+MPATH = _env("MPATH", "1") == "1"   # object<->body double bounce, saved SEPARATELY
 OBJ_ZDEPTH = float(_env("OBJ_ZDEPTH", "0.004"))  # keep 4 mm behind the front surface.
 # 4 mm, not 2 mm: a z-buffer at (keep_depth, pixel) implicitly rejects surface sloped beyond
 # atan(keep_depth/pixel) -- 63 deg at 2 mm/1 mm. At grazing (the left/right views) ~77% of genuinely
@@ -558,6 +599,7 @@ for bi, shp in enumerate(SHAPES):
             if os.path.exists(f_out):
                 nscan += 1; continue
 
+            sig_mp = env_used = None
             if obj_name == "none":
                 sig, ng, n_seated, pl, is_threat = sig_body, 0, 0, None, False
                 gq = kt = gn = None
@@ -610,6 +652,8 @@ for bi, shp in enumerate(SHAPES):
                     sig -= fwd(bq[shadow], sb[shadow])
                 if ng:
                     sig += fwd(gq[kt], gs[kt])
+                    if MPATH:
+                        sig_mp = multipath_sig(gq[kt], gs[kt], Vp, pl, roll, stance, yc)
 
             # Envelope recon (+ reuse the body-only field for fully-occluded objects, whose
             # signal is exactly sig_body). Falls back to the dense cube if DS7_ENVELOPE=0.
@@ -622,16 +666,30 @@ for bi, shp in enumerate(SHAPES):
                     field = recon_envelope(sig, env)
                     field_base = field
                 else:                                    # visible object: add its conformal shell
-                    field = recon_envelope(sig, env_with_object(env, grid, gq[kt]))
+                    env_used = env_with_object(env, grid, gq[kt])
+                    field = recon_envelope(sig, env_used)
             else:
                 field = recon_complex(sig, grid)
             mag = np.abs(field)
             pk = float(mag.max())
             db = (20*np.log10(np.maximum(mag.max(2), pk*1e-4)/pk)).astype(np.float32)
             fg, cells = gate(field, grid, dmap)
+            fg_mp = None
+            if sig_mp is not None:
+                field_mp = (recon_envelope(sig_mp, env_used) if (ENVELOPE and env_used is not None)
+                            else recon_complex(sig_mp, grid))
+                fg_mp, cells_mp = gate(field_mp, grid, dmap)
+                if not np.array_equal(cells_mp, cells):
+                    sys.exit("multipath gate cells differ from the direct pass -- the two fields "
+                             "would not be addable, which is the whole point of storing a delta")
 
             rec = dict(obj_name=obj_name, is_threat=bool(is_threat), site=site,
                        han_db=db, han_peak=pk, field_gated=fg, gate_cells=cells,
+                       # multipath DELTA. field_gated alone = single bounce (identical in meaning
+                       # to ds6); field_gated + field_gated_mp = with multipath. Absent when the
+                       # object is invisible or DS7_MPATH=0, so readers must use .get().
+                       **({"field_gated_mp": fg_mp} if fg_mp is not None else {}),
+                       mpath=MPATH,
                        n_seated=n_seated, n_visible=ng,
                        # FIX 2 provenance: the drawn seating DOF, which dataset5 could not record
                        # because they were constants. roll_deg/gap_m are NaN on the baseline scan.
@@ -678,6 +736,8 @@ for bi, shp in enumerate(SHAPES):
                            gun_aabb=np.full((2,3), np.nan), han_gun_db=np.nan)
             if nscan % SIG_EVERY == 0:
                 rec["sig"] = sig.astype(np.complex64)
+                if sig_mp is not None:                 # same cadence, so the raw multipath case
+                    rec["sig_mp"] = sig_mp.astype(np.complex64)   # stays re-reconstructable too
             np.savez_compressed(f_out, **rec)
             nscan += 1
             print(f"    {bid}/{stance}/{obj_name:<16}/{site:<16} "
