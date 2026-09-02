@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Register the dataset6 Batch job definition and submit a run. Run from the Mac (or anywhere with
+# Register the dataset7 Batch job definition and submit a run. Run from the Mac (or anywhere with
 # the jonah-cli creds). Costs nothing until a job is actually submitted.
 #
 #   bash submit.sh register              # (re)register the job definition only
@@ -33,8 +33,8 @@ register() {
   "resourceRequirements": [{"type": "GPU", "value": "1"}],
   "environment": [
     {"name": "DS7_S3_BUCKET", "value": "$BUCKET"},
-    {"name": "DS7_S3_PREFIX", "value": "dataset6"},
-    {"name": "DS7_S3_ASSETS", "value": "s3://$BUCKET/assets/ds6_assets.tgz"},
+    {"name": "DS7_S3_PREFIX", "value": "dataset7"},
+    {"name": "DS7_S3_ASSETS", "value": "s3://$BUCKET/assets/ds7_assets.tgz"},
     {"name": "DS7_ORIENTS",   "value": "front,back,left,right"},
     {"name": "DS7_APER",      "value": "rect"},
     {"name": "DS7_FREQ_WINDOW","value": "taylor"},
@@ -88,7 +88,7 @@ case "$WHAT" in
     register >/dev/null
     # 3 placements per view and one body: proves image, assets, GPU, driver and the S3 round-trip
     # without paying for a real body. DS7_MAXPLACE truncates each view's placement list.
-    submit ds6-smoke 1 '{"environment":[{"name":"DS7_MAXPLACE","value":"3"}]}' ;;
+    submit ds7-smoke 1 '{"environment":[{"name":"DS7_MAXPLACE","value":"3"}]}' ;;
   pilot)
     check_fresh
     # FULL 17x36 cross: 1330 placements/body, 31,920 scans, ~$83 at the measured 9 s/scan on
@@ -96,18 +96,18 @@ case "$WHAT" in
     # sample-mode question ("does 100/view give the same gate answers?") can be settled by
     # subsampling this set offline instead of paying for a second run.
     register >/dev/null
-    submit ds6-pilot "${N:-24}" '{"environment":[
+    submit ds7-pilot "${N:-24}" '{"environment":[
         {"name":"DS7_PLACEMENT","value":"cross"},
-        {"name":"DS7_S3_PREFIX","value":"dataset6_pilot"}]}' ;;
+        {"name":"DS7_S3_PREFIX","value":"dataset7_pilot"}]}' ;;
   pilot-sample)
     register >/dev/null
-    submit ds6-pilot-s "${N:-24}" '{"environment":[
+    submit ds7-pilot-s "${N:-24}" '{"environment":[
         {"name":"DS7_PLACEMENT","value":"sample"},
         {"name":"DS7_NPLACE","value":"100"},
-        {"name":"DS7_S3_PREFIX","value":"dataset6_pilot_s"}]}' ;;
+        {"name":"DS7_S3_PREFIX","value":"dataset7_pilot_s"}]}' ;;
   full)
     check_fresh
     register >/dev/null
-    submit ds6-full "${N:-200}" ;;
+    submit ds7-full "${N:-200}" ;;
   *) echo "usage: $0 register|smoke|pilot|full [N]" >&2; exit 2 ;;
 esac

@@ -1,4 +1,4 @@
-# dataset6 forward-model worker for AWS Batch (GPU).
+# dataset7 forward-model worker for AWS Batch (GPU).
 # Built ON tesla with podman, where model_gen and the threat_dataset modules already live, so we
 # COPY them from the build context instead of git-cloning private repos (no deploy key needed).
 #

@@ -1,4 +1,4 @@
-"""AWS Batch array-task entrypoint: generate ONE body's dataset6 scans, upload to S3.
+"""AWS Batch array-task entrypoint: generate ONE body's dataset7 scans, upload to S3.
 
 Batch sets AWS_BATCH_JOB_ARRAY_INDEX. One array index == one body, because the driver reuses the
 posed SMPL-X mesh across all four views -- sharding per (body, view) instead would re-pay the
@@ -12,7 +12,7 @@ defaults look. Extraction is skipped when the container is warm.
 
 Env from the job definition:
     DS7_S3_BUCKET   (required)  destination bucket
-    DS7_S3_PREFIX   default "dataset6"
+    DS7_S3_PREFIX   default "dataset7"
     DS7_S3_ASSETS   (required)  s3:// uri of the asset tarball
     DS7_BODY_OFFSET default 0   added to the array index
     any other DS7_* knob (APER, ORIENTS, PLACEMENT, NPLACE, SEED, JITTER, ...) is passed straight
@@ -23,7 +23,7 @@ import os, subprocess, sys, glob
 idx = int(os.environ.get("AWS_BATCH_JOB_ARRAY_INDEX", os.environ.get("DS7_INDEX", "0")))
 body = int(os.environ.get("DS7_BODY_OFFSET", "0")) + idx
 bucket = os.environ["DS7_S3_BUCKET"]
-prefix = os.environ.get("DS7_S3_PREFIX", "dataset6")
+prefix = os.environ.get("DS7_S3_PREFIX", "dataset7")
 assets = os.environ["DS7_S3_ASSETS"]
 
 # 1. license-restricted assets -> /root (idempotent; a warm container skips it)
@@ -32,7 +32,7 @@ if not os.path.exists("/root/smplx_models"):
     subprocess.check_call(["tar", "xzf", "/tmp/assets.tgz", "-C", "/root"])
 
 # 2. run exactly this one body, all views
-out = f"/tmp/ds6_{body:03d}"
+out = f"/tmp/ds7_{body:03d}"
 os.makedirs(out, exist_ok=True)
 env = dict(os.environ, DS7_OUT=out, DS7_BODY0=str(body), DS7_NBODIES="1")
 print(f"[batch idx {idx}] body={body} -> {out}", flush=True)

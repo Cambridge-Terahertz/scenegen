@@ -43,7 +43,7 @@ pick_meshes() {
 
 # ---------------------------------------------------------------- build context ----
 HEREDIR=$(cd "$(dirname "$0")" && pwd)
-rm -rf "$CTX"; mkdir -p "$CTX"/{threat_dataset,model_gen_python,ds6}
+rm -rf "$CTX"; mkdir -p "$CTX"/{threat_dataset,model_gen_python,ds7}
 cp "$HEREDIR"/{Dockerfile,entrypoint.py} "$CTX"/
 # frame.py MUST sit next to the driver: the driver does
 #   sys.path.insert(0, dirname(abspath(__file__))); import frame
@@ -74,7 +74,7 @@ if [ "$WHAT" = all ] || [ "$WHAT" = image ]; then
 fi
 
 # ---------------------------------------------------------------- assets ----
-# SMPL-X + the objects_v5 meshes + the two STLs. NOT amass -- ds6 uses the fixed screening_pose,
+# SMPL-X + the objects_v5 meshes + the two STLs. NOT amass -- ds7 uses the fixed screening_pose,
 # so the ~300 GB motion corpus the walkthrough image needed is not required here.
 if [ "$WHAT" = all ] || [ "$WHAT" = assets ]; then
   # Layout matters: it extracts to /root, and each consumer looks in a specific place.
@@ -85,10 +85,13 @@ if [ "$WHAT" = all ] || [ "$WHAT" = assets ]; then
   STAGE=$(mktemp -d); mkdir -p "$STAGE/walkthrough"
   cp -r "$(pick_meshes objects_v5)" "$STAGE/walkthrough/"
   cp "$(pick glock17_ext.stl)" "$(pick phone_hull.stl)" "$STAGE/walkthrough/"
-  TGZ=/tmp/ds6_assets.tgz
+  # ds7 assets are NOT interchangeable with ds6: objects_v5 now ships the split gun parts
+  # (gun*_steel.obj / gun*_polymer.obj). Against a ds6 tarball the driver's exists() check
+  # falls through to the old single-material mesh and silently produces ds6 gun physics.
+  TGZ=/tmp/ds7_assets.tgz
   tar czf "$TGZ" -C "$HOME" smplx_models -C "$STAGE" walkthrough
   rm -rf "$STAGE"
   ls -lh "$TGZ"
-  "$AWS" s3 cp "$TGZ" "s3://${BUCKET}/assets/ds6_assets.tgz"
-  echo "staged s3://${BUCKET}/assets/ds6_assets.tgz"
+  "$AWS" s3 cp "$TGZ" "s3://${BUCKET}/assets/ds7_assets.tgz"
+  echo "staged s3://${BUCKET}/assets/ds7_assets.tgz"
 fi
