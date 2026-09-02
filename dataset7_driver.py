@@ -8,6 +8,28 @@ WHAT CHANGED vs dataset6 -- all measured, see the commit log:
     body, so a 3 cm object kept its own interior. Ray-cast truth: the old chain was +8.9 dB
     wrong face-on and +2.3 dB at grazing even after stripping.
   * L3 STANCE. Arms up, forearms vertical, palms to the array (screening_pose(arms="up")).
+
+NO MULTIPATH, deliberately. The threat-skin dihedral corner -- the double bounce this
+single-bounce model structurally cannot produce -- was built and validated separately in
+~/stop_pose/multipath.py (stationary_pairs + return_visible + fast_double_bounce_from_pairs).
+Its 17-site occlusion survey settled the question: corner-vs-scene runs -21 dB at the very
+strongest (wb_front_right, front hip) down to -72 dB, and the BOOST TO SCENE PEAK IS +0.0 dB AT
+EVERY SITE. A gun lying flat on skin has a median contact wedge of 159 deg, deep in the dead zone
+(a corner needs 68-114 deg), so only ~12% of contact points form one at all. The corner is a real,
+aspect-robust SECOND signature at hip/appendix carries -- worth confidence and threat/non-threat
+discrimination there -- but it never exceeds the direct return, so it would add nothing to a
+detector trained on these fields.
+
+It is also computationally out of reach here: measured on realistic clouds, stationary_pairs is
+68 s and return_visible 336 s PER PLACEMENT, ~405 s against the ~9 s a whole scan takes now. ds7
+runs ~320 placements per body, so it is ~6 h/body for the pairing alone. If the hip discrimination
+question is ever revisited, run it as a separate subset study, not in this loop.
+
+Do NOT reintroduce the flat-mirror image-source shortcut that was briefly tried here: mirroring
+Tx/Rx across the seat plane gives every object point a specular partner on an infinite plane, so
+the whole gun face participates. That is the same divergence the band-pairing engine showed (a
+shallow contact has a wide in-phase band and sums as the full pair count) and it produced a bounce
+BRIGHTER than the direct return. stationary_pairs -- one specular partner per point -- is the fix.
   * MULTIPATH. Object<->body double bounce, saved separately so training can use either.
 
 Inherited from dataset 6 (ds6_m4v): matched-placement, jittered, 4-view regeneration of dataset5.
