@@ -231,7 +231,8 @@ def double_bounce(qa, na, sa, qb, nb, sb, tx, rx, k, *,
 
 def voxel_downsample(q, n, s, voxel):
     """Decimate a point cloud to ~one point per `voxel`-sized cell (mean position + normal + s).
-    The single-bounce driver samples at lambda/8 to kill speckle, but a COHERENT double-bounce sum
+    The single-bounce driver samples at lambda/8 to reproduce specularity (resolve the coherent
+    phase across the surface so the mirror-direction lobe forms correctly), but a COHERENT double-bounce sum
     is fully resolved at ~lambda/2 -- lambda/8 just multiplies the pair count 256x for no new
     information. Decimating both clouds to lambda/2 before pairing is what makes the body case
     tractable; the single bounce is recomputed at the SAME spacing so the two terms stay on one
