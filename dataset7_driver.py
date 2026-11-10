@@ -239,6 +239,18 @@ for name, o in pc.OBJECTS.items():
 ROLL_OF = {name: float(o["roll_deg"]) for name, o in pc.OBJECTS.items()}
 ROLL_OF["gun1_glock17"] = 0.0
 
+# ---- guns-only / object allowlist (backward-compatible; no-op unless DS7_OBJECTS set) ----
+_allow = _env("OBJECTS", "")
+if _allow:
+    keep = set(x for x in _allow.split(",") if x)
+    missing = keep - set(OBJECTS)
+    if missing:
+        sys.exit(f"DS7_OBJECTS names not in catalogue: {sorted(missing)}")
+    OBJECTS = {n: v for n, v in OBJECTS.items() if n in keep}
+    if not OBJECTS:
+        sys.exit("DS7_OBJECTS filtered everything")
+    print(f"[DS7_OBJECTS] restricted to {sorted(OBJECTS)}", flush=True)
+
 BACK_SITES = {"small_of_back", "upper_back", "wb_back_mid", "wb_back_l", "wb_back_r",
               "thigh_back_l", "thigh_back_r", "shin_back_l", "shin_back_r"}
 def stance_of(site):
